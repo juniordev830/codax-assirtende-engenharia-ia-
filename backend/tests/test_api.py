@@ -1,5 +1,3 @@
-import asyncio
-
 from fastapi.testclient import TestClient
 
 from app import main
@@ -30,12 +28,13 @@ def test_chat_requires_api_key(monkeypatch):
     assert "OPENAI_API_KEY" in response.json()["detail"]
 
 
-def test_chat_rejects_empty_message():
+def test_chat_rejects_blank_message(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
     response = client.post("/api/chat", json={"message": "   "})
 
-    # The schema requires at least one character; whitespace is rejected in the endpoint
-    # only after validation in current implementation, so this documents its current contract.
-    assert response.status_code == 200 or response.status_code == 422
+    assert response.status_code == 422
+    assert "vazia" in response.json()["detail"]
 
 
 def test_chat_returns_mocked_ai_reply(monkeypatch):
