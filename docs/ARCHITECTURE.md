@@ -13,6 +13,27 @@ A inspiração é ficcional; as funções precisam ser construídas e testadas c
 - `docs/`: documentação técnica, decisões e planejamento.
 - `.gitignore`: exclui segredos, ambientes virtuais, dependências e dados locais.
 
+## Acesso multiplataforma e remoto
+
+A meta é oferecer uma interface web responsiva/PWA para computador, tablet e celular. O dispositivo móvel funciona como painel de controle do Codax; o host autorizado executa ferramentas e acessa o checkout do projeto.
+
+Fluxo-alvo:
+1. O navegador do usuário conecta-se por sessão autenticada.
+2. Uma conexão privada VPN, como Tailscale, ou uma configuração HTTPS segura protege o acesso fora da rede local.
+3. O backend valida sessão, escopo e política de aprovação antes de cada ação.
+4. O serviço local executa apenas ferramentas permitidas nos repositórios autorizados.
+5. Estado de tarefas, logs e resultados são enviados à interface conectada.
+
+Requisitos:
+- Manter o backend limitado a localhost por padrão até configurar acesso remoto seguro.
+- Não publicar diretamente na internet terminal, shell ou API administrativa.
+- Nunca expor chaves de IA ou tokens de GitHub ao frontend.
+- Exigir autenticação e autorização para ações, com logs e encerramento de sessão.
+- Acesso a ferramentas locais exige que o computador host esteja ligado, acordado e online.
+- Começar com consulta de estado e acompanhamento; habilitar edição e execução remota somente após testes de segurança.
+
+A interface responsiva/PWA, a autenticação e o transporte remoto ainda são requisitos futuros, não recursos atualmente disponíveis.
+
 ## Arquitetura-alvo
 
 A arquitetura deve crescer em módulos pequenos para facilitar testes e evitar que a lógica toda fique em uma única rota:
