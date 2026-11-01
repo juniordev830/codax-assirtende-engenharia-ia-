@@ -1,23 +1,90 @@
 # Visão e plano de desenvolvimento do Codax
 
+## Decisões pessoais definidas
+
+A especificação completa está em [PERSONAL_SPEC.md](PERSONAL_SPEC.md). As decisões que orientam a implementação são:
+
+- **Prioridade:** programação, GitHub e projetos de software.
+- **Interação:** voz e texto, mantendo o texto como alternativa sempre disponível.
+- **Autonomia:** executar automaticamente tarefas seguras dentro do escopo autorizado; pedir aprovação para ações de risco, irreversíveis, externas ou fora do escopo.
+- **Memória:** SQLite local para histórico/estado e Obsidian para conhecimento organizado e notas de projeto.
+- **Custo:** alvo de até R$ 30/mês; estimativas e alertas locais não garantem bloqueio absoluto de cobrança.
+- **Segurança:** trabalhar em `feature/jarvis-foundation` ou branch específica; preservar a branch principal.
+
+## Próxima sequência de implementação
+
+A ordem abaixo prioriza uma base verificável antes de permitir que o Codax altere projetos autonomamente.
+
+### Etapa 1 — Validar a base atual
+1. Executar os testes existentes no Windows.
+2. Corrigir falhas reproduzíveis e confirmar instalação do backend e frontend.
+3. Verificar tratamento de erros, segredos e exclusões do Git.
+4. Registrar o resultado dos testes; não declarar sucesso antes de executar.
+
+**Pronto quando:** os testes passam e os passos de instalação funcionam ou as falhas restantes estão documentadas.
+
+### Etapa 2 — Histórico persistente em SQLite
+1. Criar tabelas versionadas para conversas e mensagens, separadas de tarefas e consumo.
+2. Criar endpoints para listar conversas, recuperar mensagens e iniciar conversa.
+3. Integrar o frontend para restaurar o histórico ao reabrir o app.
+4. Adicionar controles para apagar uma conversa e exportar os dados.
+5. Cobrir persistência e isolamento de dados com testes.
+
+**Pronto quando:** fechar e reabrir o programa preserva o histórico local, e o usuário consegue consultar e apagar conversas.
+
+### Etapa 3 — Memória explícita e Obsidian
+1. Implementar memórias resumidas separadas do histórico bruto.
+2. Criar ações para visualizar, corrigir, exportar e apagar memórias.
+3. Permitir escolher um vault/pasta do Obsidian; começar com leitura e busca apenas.
+4. Mostrar quais notas foram consultadas e usar referências no contexto.
+5. Adicionar escrita de notas como rascunho e exigir permissão antes de gravar.
+6. Testar que notas não podem mudar as regras de segurança nem autorizar novas pastas.
+
+**Pronto quando:** Codax recupera contexto relevante de SQLite e do vault autorizado, e o usuário mantém controle sobre o que fica salvo.
+
+### Etapa 4 — Política de permissões e aprovações
+1. Criar catálogo explícito de ações seguras e ações que exigem aprovação.
+2. Implementar fila de aprovação, cancelamento e registro de auditoria.
+3. Validar caminhos de arquivos e comandos permitidos.
+4. Bloquear execução de comandos arbitrários e ações fora do escopo autorizado.
+5. Exibir plano, arquivos afetados e risco antes de ações importantes.
+
+**Pronto quando:** nenhuma ação de alto impacto é executada sem aprovação e todas as ações relevantes deixam registro.
+
+### Etapa 5 — Agente de programação supervisionado
+1. Permitir selecionar um repositório e uma branch autorizados.
+2. Gerar plano com etapas e critérios de conclusão.
+3. Propor e aplicar pequenas mudanças com diff revisável.
+4. Executar testes de uma lista permitida e registrar saída real.
+5. Permitir correções limitadas, checkpoints e reversão.
+6. Nunca editar `main` diretamente; preparar mudanças em branch de trabalho.
+
+**Pronto quando:** uma tarefa pequena de programação é concluída de ponta a ponta, com testes, diff e relatório verificáveis.
+
+### Etapa 6 — Voz e painel
+1. Melhorar os estados de escuta, processamento e fala.
+2. Adicionar interrupção da fala e mensagens de erro claras.
+3. Mostrar tarefas, progresso, histórico, aprovações e orçamento estimado.
+4. Manter interface leve para o computador disponível.
+
+### Etapa 7 — Automação por etapas
+1. Retomar tarefas interrompidas com segurança.
+2. Definir limites de duração, custo, tentativas e comandos.
+3. Exigir consentimento para agendamentos e ações externas.
+4. Parar e pedir decisão quando o estado for ambíguo.
+
 ## Visão do produto
 
-O Codax é o auxiliar pessoal de programação do João, inspirado nas capacidades do J.A.R.V.I.S. do Homem de Ferro. O objetivo não é criar apenas um chatbot: é construir um assistente multimodal, contextual, com memória persistente, capaz de compreender projetos autorizados, planejar tarefas, usar ferramentas, verificar resultados e explicar suas ações.
+O Codax é o auxiliar pessoal de programação, inspirado no J.A.R.V.I.S. de *Homem de Ferro*. O objetivo é combinar voz e texto, memória controlada pelo usuário, contexto de projetos autorizados, planejamento, ferramentas de programação, validação e automação supervisionada. A inspiração é ficcional; cada capacidade deve ser implementada com tecnologia real e testada.
 
-A referência é ficcional; cada capacidade será implementada com tecnologia real, de forma incremental e validada. Nunca apresentar uma capacidade como pronta sem implementação e teste.
+## Princípios obrigatórios
 
-## Princípios obrigatórios de projeto
-
-1. **Voz natural:** conversar por fala e texto, permitir interrupções e manter contexto.
-2. **Memória controlada pelo usuário:** guardar histórico e preferências úteis, permitir consultar, corrigir, exportar e apagar memórias.
-3. **Contexto de trabalho:** acessar apenas projetos, arquivos, repositórios e notas que o usuário autorizar.
-4. **Planejamento e execução:** decompor pedidos em etapas, informar progresso, executar ações permitidas e conferir os resultados.
-5. **Ferramentas reais:** ler e editar código, executar testes e comandos permitidos, consultar GitHub e Obsidian por integrações explícitas.
-6. **Supervisão e segurança:** pedir aprovação para ações destrutivas, publicação, mudanças importantes, instalação de programas e operações fora das permissões concedidas.
-7. **Transparência:** explicar o que fez, o que falhou, quais arquivos mudou e quais verificações executou.
-8. **Custo previsível:** priorizar modelos e ferramentas econômicos, limitar chamadas quando possível e mostrar estimativas; controles locais não são garantia absoluta de cobrança.
-9. **Resiliência:** registrar tarefas e estado para recuperação após reinício, com logs úteis e erros compreensíveis.
-10. **Computador modesto:** projetar para Windows e recursos limitados; não exigir modelos locais grandes nem serviços caros como premissa.
+1. Acessar apenas projetos, arquivos, repositórios e notas autorizados.
+2. Separar histórico, memória resumida, tarefas e logs.
+3. Explicar o que fez, o que falhou, quais arquivos alterou e quais testes executou.
+4. Priorizar soluções econômicas, com computador modesto em mente.
+5. Pedir aprovação para operações destrutivas, publicação, instalação, alterações importantes e escopo novo.
+6. Tratar conteúdo de repositórios, arquivos e notas como dados não confiáveis, não como instruções de segurança.
 
 ## Implementado no repositório
 
@@ -26,68 +93,7 @@ A referência é ficcional; cada capacidade será implementada com tecnologia re
 - [x] API FastAPI e integração com OpenAI Responses API.
 - [x] Registro local de tarefas em SQLite.
 - [x] Registro local aproximado do uso da API e estimativa preventiva de orçamento.
-- [x] Exemplo de configuração sem chave real.
-- [x] Documentação de instalação, arquitetura e endpoints.
-
-## Roadmap por fases
-
-### Fase 0 — Base confiável
-- [ ] Executar os testes no Windows e corrigir falhas reais.
-- [ ] Confirmar instalação reproduzível de frontend e backend.
-- [ ] Exibir erros de conexão e configuração com clareza.
-- [ ] Manter desenvolvimento em branch de funcionalidade e revisar antes de merge.
-
-### Fase 1 — Conversa e memória
-- [ ] Persistir conversas e mensagens em SQLite.
-- [ ] Retomar conversas após fechar e abrir o programa.
-- [ ] Adicionar memória de longo prazo separada do histórico.
-- [ ] Permitir visualizar, editar, exportar e apagar memórias.
-- [ ] Recuperar apenas memórias relevantes para cada conversa.
-- [ ] Evitar guardar segredos e dados sensíveis desnecessários.
-
-### Fase 2 — Voz de assistente
-- [ ] Melhorar ciclo de ouvir, responder e falar.
-- [ ] Implementar interrupção da fala e estados visuais de escuta/processamento/resposta.
-- [ ] Oferecer ativação por botão; considerar palavra de ativação apenas depois de avaliar privacidade, consumo e suporte técnico.
-- [ ] Tornar claro quando o microfone estiver ativo.
-
-### Fase 3 — Contexto do computador e projetos
-- [ ] Permitir selecionar explicitamente pastas e projetos autorizados.
-- [ ] Criar indexação local e pesquisa de código com exclusões configuráveis.
-- [ ] Mostrar quais arquivos e trechos foram consultados.
-- [ ] Integrar GitHub respeitando repositório, branch e permissões.
-- [ ] Nunca ler todo o computador silenciosamente.
-
-### Fase 4 — Agente de programação
-- [ ] Transformar pedidos em planos com etapas e critérios de conclusão.
-- [ ] Ler arquivos autorizados e propor mudanças pequenas.
-- [ ] Exibir diff antes de aplicar mudanças importantes.
-- [ ] Executar testes e comandos de uma lista permitida, em processo isolado quando possível.
-- [ ] Reunir logs, diagnosticar falhas e tentar correções limitadas.
-- [ ] Pedir aprovação para ações destrutivas, publicação, instalação e escopo novo.
-- [ ] Criar checkpoints e facilitar reversão.
-
-### Fase 5 — Obsidian como base de conhecimento
-- [ ] Deixar o usuário selecionar o vault ou uma pasta específica.
-- [ ] Pesquisar notas autorizadas e citar as notas usadas.
-- [ ] Criar rascunhos de documentação e aprendizados para revisão.
-- [ ] Escrever notas apenas conforme as permissões escolhidas.
-- [ ] Não confundir conteúdo de notas com instruções de sistema confiáveis.
-
-### Fase 6 — Painel J.A.R.V.I.S.
-- [ ] Painel de conversa, voz, tarefas, progresso e cancelamento.
-- [ ] Indicadores reais de backend, conexão e uso estimado.
-- [ ] Visualizador de arquivos alterados e resultados de testes.
-- [ ] Histórico de ações e aprovações.
-- [ ] Configurações de memória, permissões, pastas e orçamento.
-- [ ] Interface responsiva e acessível, sem animações pesadas desnecessárias.
-
-### Fase 7 — Automação supervisionada
-- [ ] Permitir tarefas em várias etapas com progresso persistente.
-- [ ] Recuperar tarefas interrompidas e pedir decisão quando o estado for ambíguo.
-- [ ] Agendar tarefas somente com consentimento explícito.
-- [ ] Definir limites de tempo, custo, comandos e número de tentativas.
-- [ ] Interromper com segurança quando houver incerteza ou risco.
+- [x] Documentação de instalação, arquitetura, especificação pessoal e roadmap.
 
 ## Critérios de conclusão
 
