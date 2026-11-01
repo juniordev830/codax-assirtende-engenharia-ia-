@@ -1,6 +1,12 @@
 # J.A.R.V.I.S. Dev — Codax
 
-Assistente de programação em português do Brasil, com interface React, API local FastAPI e integração com a OpenAI Responses API. A base do projeto inclui registro persistente de tarefas e contabilização local aproximada do uso da API.
+Assistente pessoal de programação em português do Brasil, com interface React, API local FastAPI e integração com a OpenAI Responses API. A base do projeto inclui registro persistente de tarefas e contabilização local aproximada do uso da API.
+
+## Especificação pessoal e planejamento
+
+- [Especificação pessoal do Codax](docs/PERSONAL_SPEC.md): prioridades, voz e texto, autonomia, memória Obsidian + SQLite, segurança e orçamento-alvo de R$ 30/mês.
+- [Arquitetura](docs/ARCHITECTURE.md): organização técnica atual e arquitetura-alvo.
+- [Plano de desenvolvimento](docs/ROADMAP.md): fases e próximos passos.
 
 ## Estrutura do repositório
 
@@ -19,13 +25,12 @@ Assistente de programação em português do Brasil, com interface React, API lo
 │   │   └── App.jsx          # Interface principal de conversa
 │   └── package.json         # Scripts e dependências React/Vite
 ├── docs/
+│   ├── PERSONAL_SPEC.md     # Requisitos pessoais e regras de autonomia
 │   ├── ARCHITECTURE.md      # Arquitetura, fluxo e endpoints
 │   └── ROADMAP.md           # Etapas implementadas e próximas entregas
 ├── .gitignore
 └── README.md
 ```
-
-Para detalhes técnicos, consulte [Arquitetura](docs/ARCHITECTURE.md) e [Plano de desenvolvimento](docs/ROADMAP.md).
 
 ## O que existe hoje
 
@@ -55,6 +60,7 @@ Para detalhes técnicos, consulte [Arquitetura](docs/ARCHITECTURE.md) e [Plano d
 - O banco local fica em `backend/.jarvis_data/` e não deve ser enviado ao Git.
 - Não cole chaves, senhas ou tokens na conversa.
 - O orçamento local é uma estimativa preventiva, não um limite financeiro garantido. Confira também o painel oficial de uso e cobrança.
+- Desenvolver em `feature/jarvis-foundation` ou em branch de tarefa; preservar a branch principal.
 
 ## 1. Configurar a chave e o orçamento
 
@@ -73,7 +79,7 @@ JARVIS_INPUT_PRICE_PER_MILLION=0.75
 JARVIS_OUTPUT_PRICE_PER_MILLION=4.50
 ```
 
-O valor padrão em dólares busca ajudar a manter o uso reduzido, mas o equivalente em reais varia com câmbio e impostos. Confira os preços oficiais do modelo antes de alterar os valores por token.
+O alvo pessoal é até R$ 30 por mês. A configuração acima é apenas um valor padrão em dólares para estimativa; câmbio, impostos e preços podem variar. Controles locais não garantem um bloqueio financeiro absoluto. Confira os preços e o uso no painel oficial antes de alterar os valores por token.
 
 ## 2. Iniciar o backend
 
@@ -81,7 +87,7 @@ Abra um PowerShell na pasta `backend`:
 
 ```powershell
 py -m venv .venv
-.\.venv\Scripts\Activate.ps1
+.\\.venv\\Scripts\\Activate.ps1
 python -m pip install -r requirements.txt
 uvicorn app.main:app --reload --host 127.0.0.1 --port 8765
 ```
@@ -89,8 +95,8 @@ uvicorn app.main:app --reload --host 127.0.0.1 --port 8765
 Se a ativação do ambiente virtual for bloqueada:
 
 ```powershell
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8765
+.\\.venv\\Scripts\\python.exe -m pip install -r requirements.txt
+.\\.venv\\Scripts\\python.exe -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8765
 ```
 
 Confira `http://127.0.0.1:8765/api/health`. O campo `ai_configured` deve ser `true` quando a chave estiver carregada. A documentação interativa da API fica em `http://127.0.0.1:8765/docs`.
@@ -108,7 +114,7 @@ Abra o endereço local mostrado pelo Vite, normalmente `http://127.0.0.1:5173`.
 
 ## 4. Endpoints locais
 
-- `GET /api/health`: estado do backend e configuração da IA.
+- `GET /api/health`: saúde da API e configuração da IA.
 - `GET /api/budget`: orçamento configurado, gasto registrado e saldo estimado do mês UTC.
 - `GET /api/tasks`: lista tarefas.
 - `POST /api/tasks`: cria tarefa.
