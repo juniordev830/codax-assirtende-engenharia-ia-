@@ -19,7 +19,7 @@ Nunca diga que executou uma ação externa. Forneça código e passos seguros qu
 Não solicite que o usuário envie chaves de API, senhas ou tokens pelo chat.
 """
 
-app = FastAPI(title="JARVIS Dev Local API", version="0.2.0")
+app = FastAPI(title="JARVIS Dev Local API", version="0.3.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -47,6 +47,10 @@ def health():
 
 @app.post("/api/chat")
 async def chat(payload: ChatRequest):
+    message = payload.message.strip()
+    if not message:
+        raise HTTPException(status_code=422, detail="A mensagem não pode estar vazia.")
+
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         raise HTTPException(
@@ -62,13 +66,15 @@ async def chat(payload: ChatRequest):
             response = await client.responses.create(
                 model=MODEL,
                 instructions=SYSTEM_INSTRUCTIONS,
-                input=payload.message.strip(),
+                input=message,
                 max_output_tokens=900,
             )
         answer = (response.output_text or "").strip()
         if not answer:
             raise HTTPException(status_code=502, detail="A IA não retornou texto. Tente novamente.")
         return {"reply": answer, "mode": "openai", "model": MODEL}
+    except HTTPException:
+        raise
     except AuthenticationError:
         raise HTTPException(
             status_code=503,
