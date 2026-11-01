@@ -53,8 +53,8 @@ Esses são objetivos arquiteturais; módulos ainda não implementados não devem
 
 1. A interface React envia a mensagem para `POST /api/chat`.
 2. A API verifica se existe `OPENAI_API_KEY` e estima o custo da chamada.
-3. A API chama a OpenAI Responses API.
-4. O backend devolve a resposta e registra o uso retornado/estimado.
+3. A API chama o provedor configurado por AI_PROVIDER, usando AI_MODEL e opcionalmente AI_BASE_URL; o adaptador atual usa o formato de API compatível com OpenAI.
+4. O backend devolve a resposta e registra o uso retornado/estimado com o identificador do provedor/modelo.
 5. A interface exibe a resposta e, se habilitado, usa a síntese de voz do navegador.
 
 O histórico ainda não é persistido como memória pessoal de conversas. O SQLite existente registra tarefas e uso da API.
@@ -77,7 +77,7 @@ O histórico ainda não é persistido como memória pessoal de conversas. O SQLi
 ## Segurança e permissões
 
 - Banco local atual: `backend/.jarvis_data/jarvis.sqlite3`.
-- A chave da API deve ficar exclusivamente em `backend/.env`.
+- As chaves devem ficar exclusivamente em `backend/.env`. Use AI_API_KEY, AI_PROVIDER, AI_MODEL e, quando necessário, AI_BASE_URL. Para compatibilidade, OPENAI_API_KEY e OPENAI_MODEL antigos continuam aceitos. Ollama/LM Studio precisam estar instalados e com um modelo disponível. O catálogo de Gemini e Claude é informativo até serem implementados adaptadores nativos.
 - Não enviar banco local, `.env`, `.venv/`, `node_modules/` ou `dist/` ao Git.
 - O assistente ainda não tem execução autônoma de comandos nem acesso genérico aos arquivos do computador.
 - Futuro acesso a arquivos deve ser limitado às pastas selecionadas pelo usuário.
@@ -95,7 +95,8 @@ O histórico ainda não é persistido como memória pessoal de conversas. O SQLi
 - `POST /api/tasks`: cria tarefa.
 - `GET /api/tasks/{task_id}`: consulta tarefa.
 - `PATCH /api/tasks/{task_id}`: atualiza estado, progresso ou etapas.
-- `POST /api/chat`: envia mensagem para a IA.
+- `POST /api/chat`: envia mensagem para o provedor de IA configurado.
+- `GET /api/ai/providers`: lista provedores conhecidos e identifica a seleção atual; não garante que credenciais, modelo ou serviço remoto estejam válidos.
 
 ## Portas locais
 
