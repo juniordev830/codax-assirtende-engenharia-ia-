@@ -1,6 +1,7 @@
 """Conservative local budget guard for API calls."""
 
 import os
+from datetime import datetime, timezone
 
 from .task_manager import month_spend_usd
 
@@ -39,7 +40,7 @@ def budget_status() -> dict[str, float | str]:
     budget = monthly_budget_usd()
     spent = month_spend_usd()
     return {
-        "month_utc": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).strftime("%Y-%m"),
+        "month_utc": datetime.now(timezone.utc).strftime("%Y-%m"),
         "budget_usd": round(budget, 4),
         "tracked_spend_usd": round(spent, 6),
         "remaining_usd": round(max(0.0, budget - spent), 6),
