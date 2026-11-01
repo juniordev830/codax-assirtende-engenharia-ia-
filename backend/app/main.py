@@ -101,9 +101,26 @@ def health():
     return {
         "status": "ok",
         "service": "jarvis-dev-local",
-        "ai_configured": bool(os.getenv("OPENAI_API_KEY")),
-        "model": MODEL,
+        "ai_configured": bool(AI_API_KEY),
+        "provider": AI_PROVIDER,
+        "model": AI_MODEL,
+        "base_url_configured": bool(AI_BASE_URL),
         "time_utc": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@app.get("/api/ai/providers")
+def get_ai_providers():
+    """Lista provedores conhecidos e informa qual está selecionado/configurado."""
+    return {
+        "active_provider": AI_PROVIDER,
+        "active_model": AI_MODEL,
+        "providers": [
+            {**provider, "selected": provider["id"] == AI_PROVIDER,
+             "configured": bool(AI_API_KEY) if provider["id"] == AI_PROVIDER else False}
+            for provider in PROVIDER_CATALOG
+        ],
+        "note": "O adaptador atual chama APIs compatíveis com OpenAI; Gemini e Claude ainda exigem adaptadores nativos.",
     }
 
 
@@ -148,7 +165,9 @@ def patch_task(task_id: str, payload: TaskUpdateRequest):
 
 @app.post("/api/chat")
 async def chat(payload: ChatRequest):
-    api_key = os.getenv("OPENAI_API_KEY")
+    api_key = AI_API_KEY
+    if AI_PROVIDER not in OPENAI_COMPATIBLE_PROVIDERS:
+        raise HTTPException(status_code=501, detail="Este provedor ainda precisa de um adaptador nativo. Selecione um provedor OpenAI-compatible em backend/.env.")
     if not api_key:
         raise HTTPException(
             status_code=503,
@@ -171,7 +190,10 @@ async def chat(payload: ChatRequest):
         )
 
     try:
-        client_options = {"api_key": api_key, "timeout": 45.0, "max_retries": 1}\n        if AI_BASE_URL:\n            client_options["base_url"] = AI_BASE_URL\n        async with AsyncOpenAI(**client_options) as client:
+        client_options = {"api_key": api_key, "timeout": 45.0, "max_retries": 1}
+        if AI_BASE_URL:
+            client_options["base_url"] = AI_BASE_URL
+        async with AsyncOpenAI(**client_options) as client:
             response = await client.responses.create(
                 model=AI_MODEL,
                 instructions=SYSTEM_INSTRUCTIONS,
@@ -190,7 +212,7 @@ async def chat(payload: ChatRequest):
         if output_tokens is None:
             output_tokens = MAX_OUTPUT_TOKENS
         record_api_usage(
-            MODEL,
+            f"{AI_PROVIDER}:{AI_MODEL}",
             input_tokens,
             output_tokens,
             input_price_per_million(),
@@ -198,8 +220,9 @@ async def chat(payload: ChatRequest):
         )
         return {
             "reply": answer,
-            "mode": "openai",
-            "model": MODEL,
+            "mode": AI_PROVIDER,
+            "provider": AI_PROVIDER,
+            "model": AI_MODEL,
             "budget": budget_status(),
         }
     except AuthenticationError:
