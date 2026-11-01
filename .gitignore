@@ -1,0 +1,15 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.env
+
+# Node
+node_modules/
+dist/
+
+# Editors and OS
+.vscode/
+.DS_Store
+Thumbs.db
