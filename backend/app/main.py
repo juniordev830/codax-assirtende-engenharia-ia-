@@ -4,6 +4,9 @@ from math import ceil
 from typing import Any
 
 from dotenv import load_dotenv
+
+load_dotenv()
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from openai import APIConnectionError, APIStatusError, AuthenticationError, AsyncOpenAI, RateLimitError
@@ -23,8 +26,6 @@ from .task_manager import (
     record_api_usage,
     update_task,
 )
-
-load_dotenv()
 
 MODEL = os.getenv("OPENAI_MODEL", "gpt-5.4-mini")
 MAX_OUTPUT_TOKENS = 900
@@ -155,8 +156,12 @@ async def chat(payload: ChatRequest):
             raise HTTPException(status_code=502, detail="A IA não retornou texto. Tente novamente.")
 
         usage = getattr(response, "usage", None)
-        input_tokens = getattr(usage, "input_tokens", None) or estimated_input_tokens
-        output_tokens = getattr(usage, "output_tokens", None) or MAX_OUTPUT_TOKENS
+        input_tokens = getattr(usage, "input_tokens", None)
+        if input_tokens is None:
+            input_tokens = estimated_input_tokens
+        output_tokens = getattr(usage, "output_tokens", None)
+        if output_tokens is None:
+            output_tokens = MAX_OUTPUT_TOKENS
         record_api_usage(
             MODEL,
             input_tokens,
