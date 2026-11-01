@@ -10,9 +10,25 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [listening, setListening] = useState(false);
   const [voice, setVoice] = useState(true);
+  const [availableVoices, setAvailableVoices] = useState([]);
+  const [selectedVoice, setSelectedVoice] = useState("");
   const [messages, setMessages] = useState([{ role: "assistant", text: "Olá! Sou o J.A.R.V.I.S. Dev. Meu cérebro de IA já está integrado ao serviço local. Configure a chave da API no backend para começar a conversar comigo." }]);
   const recognition = useRef(null);
   const bottom = useRef(null);
+
+  useEffect(() => {
+    if (!("speechSynthesis" in window)) return;
+    const loadVoices = () => {
+      const voices = window.speechSynthesis.getVoices();
+      setAvailableVoices(voices);
+      const portuguese = voices.filter(item => item.lang?.toLowerCase().startsWith("pt-br"));
+      const preferred = portuguese.find(item => /antonio|daniel|male|mascul/i.test(item.name)) || portuguese.find(item => /google|microsoft/i.test(item.name)) || portuguese[0];
+      if (preferred) setSelectedVoice(current => current || preferred.name);
+    };
+    loadVoices();
+    window.speechSynthesis.addEventListener?.("voiceschanged", loadVoices);
+    return () => window.speechSynthesis.removeEventListener?.("voiceschanged", loadVoices);
+  }, []);
 
   useEffect(() => {
     fetch(`${API}/api/health`)
@@ -27,6 +43,10 @@ export default function App() {
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = "pt-BR";
+    utterance.rate = 0.92;
+    utterance.pitch = 0.82;
+    const chosenVoice = availableVoices.find(item => item.name === selectedVoice);
+    if (chosenVoice) { utterance.voice = chosenVoice; utterance.lang = chosenVoice.lang || "pt-BR"; }
     window.speechSynthesis.speak(utterance);
   }
 
@@ -85,7 +105,7 @@ export default function App() {
     <section className="workspace">
       <aside className="sidebar"><div className="section-label">MÓDULOS</div><div className="nav-item active"><Bot size={17}/> Assistente</div><div className="nav-item disabled"><Code2 size={17}/> Análise de código <small>EM BREVE</small></div><div className="nav-item disabled"><Github size={17}/> GitHub <small>EM BREVE</small></div><div className="security-note"><ShieldCheck size={18}/><div><strong>Proteção ativa</strong><p>A IA conversa e orienta, mas ainda não executa comandos nem altera arquivos.</p></div></div></aside>
       <section className="chat-panel">
-        <div className="chat-head"><div className="assistant-avatar"><Bot size={20}/></div><div><strong>J.A.R.V.I.S.</strong><span>{aiConfigured ? "IA conectada · programação em português" : "Assistente de programação · configure a API"}</span></div><button className={`icon-button ${voice ? "selected" : ""}`} title="Ativar/desativar respostas faladas" onClick={() => setVoice(v => !v)}><Volume2 size={18}/></button></div>
+        <div className="chat-head"><div className="assistant-avatar"><Bot size={20}/></div><div><strong>J.A.R.V.I.S.</strong><span>{aiConfigured ? "IA conectada · programação em português" : "Assistente de programação · configure a API"}</span></div><div className="voice-controls"><select className="voice-select" value={selectedVoice} onChange={e => setSelectedVoice(e.target.value)} aria-label="Voz do assistente" title="Escolher voz disponível no navegador"><option value="">Voz padrão</option>{availableVoices.filter(item => item.lang?.toLowerCase().startsWith("pt-br")).map(item => <option key={`${item.name}-${item.lang}`} value={item.name}>{item.name}</option>)}</select><button className={`icon-button ${voice ? "selected" : ""}`} title="Ativar/desativar respostas faladas" onClick={() => { if (voice) window.speechSynthesis?.cancel(); setVoice(v => !v); }}><Volume2 size={18}/></button></div></div>
         <div className="messages">{messages.map((item, i) => <div key={i} className={`message-row ${item.role}`}><div className="message-avatar">{item.role === "assistant" ? <Bot size={16}/> : "J"}</div><div className="bubble"><div className="bubble-label">{item.role === "assistant" ? "J.A.R.V.I.S." : "VOCÊ"}</div>{item.text}</div></div>)}{busy && <div className="typing">J.A.R.V.I.S. está pensando •••</div>}<div ref={bottom}/></div>
         <form className="composer" onSubmit={e => { e.preventDefault(); send(); }}><button type="button" className={`mic-button ${listening ? "listening" : ""}`} title="Falar em português" onClick={toggleMic}>{listening ? <MicOff size={19}/> : <Mic size={19}/>}</button><input value={message} onChange={e => setMessage(e.target.value)} placeholder="Digite uma instrução para o J.A.R.V.I.S..." aria-label="Mensagem"/><button className="send-button" type="submit" disabled={!message.trim() || busy} aria-label="Enviar"><Send size={17}/></button></form>
         <div className="footnote">A chave fica somente no backend. Não envie senhas, tokens ou chaves secretas no chat.</div>
