@@ -27,7 +27,34 @@ from .task_manager import (
     update_task,
 )
 
-MODEL = os.getenv("OPENAI_MODEL", "gpt-5.4-mini")
+AI_PROVIDER = os.getenv("AI_PROVIDER", "openai").strip().lower()
+AI_MODEL = os.getenv("AI_MODEL") or os.getenv("OPENAI_MODEL", "gpt-5.4-mini")
+AI_BASE_URL = os.getenv("AI_BASE_URL", "").strip().rstrip("/")
+AI_API_KEY = os.getenv("AI_API_KEY") or os.getenv("OPENAI_API_KEY", "")
+# Ollama normalmente roda localmente e pode aceitar uma chave fictícia via API compatível.
+if AI_PROVIDER == "ollama" and not AI_API_KEY:
+    AI_API_KEY = "ollama-local"
+
+OPENAI_COMPATIBLE_PROVIDERS = {
+    "openai": "OpenAI",
+    "openrouter": "OpenRouter",
+    "groq": "Groq",
+    "deepseek": "DeepSeek",
+    "together": "Together AI",
+    "ollama": "Ollama (modelos locais)",
+    "lmstudio": "LM Studio (modelos locais)",
+}
+PROVIDER_CATALOG = [
+    {"id": "openai", "name": "OpenAI", "kind": "cloud", "integration": "ativa por configuração"},
+    {"id": "openrouter", "name": "OpenRouter", "kind": "cloud", "integration": "API compatível; exige chave e modelo"},
+    {"id": "groq", "name": "Groq", "kind": "cloud", "integration": "API compatível; exige chave e modelo"},
+    {"id": "deepseek", "name": "DeepSeek", "kind": "cloud", "integration": "API compatível; exige chave e modelo"},
+    {"id": "together", "name": "Together AI", "kind": "cloud", "integration": "API compatível; exige chave e modelo"},
+    {"id": "ollama", "name": "Ollama", "kind": "local", "integration": "API local compatível; instalar e baixar modelo"},
+    {"id": "lmstudio", "name": "LM Studio", "kind": "local", "integration": "API local compatível; iniciar servidor local"},
+    {"id": "gemini", "name": "Google Gemini", "kind": "cloud", "integration": "adaptador nativo futuro"},
+    {"id": "anthropic", "name": "Claude (Anthropic)", "kind": "cloud", "integration": "adaptador nativo futuro"},
+]
 MAX_OUTPUT_TOKENS = 900
 SYSTEM_INSTRUCTIONS = """
 Você é J.A.R.V.I.S. Dev, um assistente de programação em português do Brasil.
@@ -144,9 +171,9 @@ async def chat(payload: ChatRequest):
         )
 
     try:
-        async with AsyncOpenAI(api_key=api_key, timeout=45.0, max_retries=1) as client:
+        client_options = {"api_key": api_key, "timeout": 45.0, "max_retries": 1}\n        if AI_BASE_URL:\n            client_options["base_url"] = AI_BASE_URL\n        async with AsyncOpenAI(**client_options) as client:
             response = await client.responses.create(
-                model=MODEL,
+                model=AI_MODEL,
                 instructions=SYSTEM_INSTRUCTIONS,
                 input=message,
                 max_output_tokens=MAX_OUTPUT_TOKENS,
@@ -178,7 +205,7 @@ async def chat(payload: ChatRequest):
     except AuthenticationError:
         raise HTTPException(
             status_code=503,
-            detail="A chave da API foi recusada. Confira OPENAI_API_KEY no arquivo backend/.env.",
+            detail="A autenticação do provedor falhou. Confira AI_API_KEY no arquivo backend/.env.",
         ) from None
     except RateLimitError:
         raise HTTPException(
