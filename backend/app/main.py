@@ -194,21 +194,23 @@ async def chat(payload: ChatRequest):
         if AI_BASE_URL:
             client_options["base_url"] = AI_BASE_URL
         async with AsyncOpenAI(**client_options) as client:
-            response = await client.responses.create(
+            response = await client.chat.completions.create(
                 model=AI_MODEL,
-                instructions=SYSTEM_INSTRUCTIONS,
-                input=message,
-                max_output_tokens=MAX_OUTPUT_TOKENS,
+                messages=[
+                    {"role": "system", "content": SYSTEM_INSTRUCTIONS},
+                    {"role": "user", "content": message},
+                ],
+                max_tokens=MAX_OUTPUT_TOKENS,
             )
-        answer = (response.output_text or "").strip()
+        answer = (response.choices[0].message.content or "").strip()
         if not answer:
             raise HTTPException(status_code=502, detail="A IA não retornou texto. Tente novamente.")
 
         usage = getattr(response, "usage", None)
-        input_tokens = getattr(usage, "input_tokens", None)
+        input_tokens = getattr(usage, "prompt_tokens", None)
         if input_tokens is None:
             input_tokens = estimated_input_tokens
-        output_tokens = getattr(usage, "output_tokens", None)
+        output_tokens = getattr(usage, "completion_tokens", None)
         if output_tokens is None:
             output_tokens = MAX_OUTPUT_TOKENS
         record_api_usage(
