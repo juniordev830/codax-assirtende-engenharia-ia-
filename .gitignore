@@ -13,3 +13,6 @@ dist/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Local J.A.R.V.I.S. task and usage database
+backend/.jarvis_data/
