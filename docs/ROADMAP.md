@@ -85,6 +85,16 @@ A ordem abaixo prioriza uma base verificável antes de permitir que o Codax alte
 3. Exigir consentimento para agendamentos e ações externas.
 4. Parar e pedir decisão quando o estado for ambíguo.
 
+### Etapa 9 — Camada multi-IA
+1. Permitir selecionar provedores compatíveis com OpenAI: OpenAI, OpenRouter, Groq, DeepSeek e Together AI.
+2. Preparar conexões com modelos locais via Ollama e LM Studio, sem enviar prompts para a nuvem quando o usuário escolher um modelo local.
+3. Implementar adaptadores nativos e testes para Google Gemini e Anthropic Claude.
+4. Exibir provedor/modelo ativo, estado da configuração e erros de conexão.
+5. Separar estimativas de custo por provedor/modelo; nunca tratar a estimativa local como limite financeiro garantido.
+6. Adicionar fallback entre provedores somente com consentimento/configuração explícita, informando quando dados forem enviados a outro serviço.
+
+**Parcialmente implementado:** seleção por variáveis de ambiente, catálogo em GET /api/ai/providers e chamada por API compatível com OpenAI. Gemini e Claude ainda não estão conectados; catálogo não significa integração concluída.
+
 ## Visão do produto
 
 O Codax é o auxiliar pessoal de programação, inspirado no J.A.R.V.I.S. de *Homem de Ferro*. O objetivo é combinar voz e texto, memória controlada pelo usuário, contexto de projetos autorizados, planejamento, ferramentas de programação, validação e automação supervisionada. A inspiração é ficcional; cada capacidade deve ser implementada com tecnologia real e testada.
