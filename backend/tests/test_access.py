@@ -22,3 +22,27 @@ def test_session_and_rate_limit(monkeypatch):
             response = client.post("/api/chat", json={"message": "oi"}, headers=origin)
         assert response.status_code == 429
     main._buckets.clear()
+
+def test_short_configured_token_is_rejected_for_bearer_and_session(monkeypatch):
+    monkeypatch.setenv("CODAX_ACCESS_TOKEN", "too-short")
+    main._buckets.clear()
+    try:
+        with TestClient(main.app, client=("192.0.2.2", 123)) as client:
+            assert client.post("/api/chat", json={"message": "oi"}, headers={"Authorization": "Bearer too-short"}).status_code == 503
+            assert client.post("/api/session", json={"token": "too-short"}, headers={"Origin": "http://localhost:5173"}).status_code == 503
+    finally:
+        main._buckets.clear()
+
+def test_bearer_requires_scheme_and_unicode_login_is_handled(monkeypatch):
+    token = "valid-test-access-token-" * 2
+    monkeypatch.setenv("CODAX_ACCESS_TOKEN", token)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    main._buckets.clear()
+    try:
+        with TestClient(main.app, client=("192.0.2.3", 123)) as client:
+            assert client.post("/api/chat", json={"message": "oi"}, headers={"Authorization": token}).status_code == 401
+            assert client.post("/api/chat", json={"message": "oi"}, headers={"Authorization": "Bearer " + token}).status_code == 200
+            response = client.post("/api/session", json={"token": "inválido"}, headers={"Origin": "http://localhost:5173"})
+            assert response.status_code == 401
+    finally:
+        main._buckets.clear()
