@@ -17,6 +17,7 @@ from typing import Literal
 from app.github_readonly import list_public_repositories, read_public_repository
 from app.code_inspection import list_reviewable_files, inspect_public_source
 from app.ai_code_review import review_with_ai
+from app.multi_file_review import review_multiple_locally, propose_multifile_diff
 
 load_dotenv()
 
@@ -113,6 +114,36 @@ class AIReviewRequest(BaseModel):
 async def github_ai_review(repo_name: str, payload: AIReviewRequest):
     # The explicit confirmation and expected file SHA are mandatory.
     return await review_with_ai(repo_name, payload.path, payload.expected_sha)
+
+
+class SourceSelection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    path: str = Field(min_length=1, max_length=220)
+    expected_sha: str = Field(min_length=40, max_length=40)
+
+
+class LocalMultiFileRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    files: list[SourceSelection] = Field(min_length=1, max_length=3)
+
+
+class DiffProposalRequest(LocalMultiFileRequest):
+    confirmed_external_processing: Literal[True]
+    preview_only: Literal[True]
+
+
+@app.post("/api/github/repos/{repo_name}/review-batch")
+async def github_review_batch(repo_name: str, payload: LocalMultiFileRequest):
+    return await review_multiple_locally(
+        repo_name, [item.model_dump() for item in payload.files]
+    )
+
+
+@app.post("/api/github/repos/{repo_name}/diff-proposal")
+async def github_diff_proposal(repo_name: str, payload: DiffProposalRequest):
+    return await propose_multifile_diff(
+        repo_name, [item.model_dump() for item in payload.files]
+    )
 
 
 @app.get("/api/github/repos/{repo_name}")
