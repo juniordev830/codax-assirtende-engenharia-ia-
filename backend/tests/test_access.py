@@ -1,0 +1,24 @@
+from fastapi.testclient import TestClient
+from app import main
+
+def test_remote_access_fails_closed_without_token(monkeypatch):
+    monkeypatch.delenv("CODAX_ACCESS_TOKEN", raising=False)
+    main._buckets.clear()
+    with TestClient(main.app, client=("192.0.2.1", 123)) as client:
+        assert client.post("/api/chat", json={"message": "oi"}).status_code == 503
+
+def test_session_and_rate_limit(monkeypatch):
+    token = "test-access-token-" * 3
+    monkeypatch.setenv("CODAX_ACCESS_TOKEN", token)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    main._buckets.clear()
+    with TestClient(main.app) as client:
+        assert client.post("/api/chat", json={"message": "oi"}).status_code == 401
+        origin = {"Origin": "http://localhost:5173"}
+        assert client.post("/api/session", json={"token": token}, headers=origin).status_code == 200
+        assert client.post("/api/chat", json={"message": "oi"}, headers=origin).status_code == 200
+        assert client.post("/api/chat", json={"message": "oi"}, headers={"Origin": "https://other.example"}).status_code == 403
+        for _ in range(25):
+            response = client.post("/api/chat", json={"message": "oi"}, headers=origin)
+        assert response.status_code == 429
+    main._buckets.clear()

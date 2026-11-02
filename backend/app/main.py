@@ -1,9 +1,14 @@
 import os
 import re
+import hmac
+import time
+from collections import OrderedDict
+from threading import Lock
 from datetime import datetime, timezone
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from openai import APIConnectionError, APIStatusError, AuthenticationError, AsyncOpenAI, RateLimitError
 from pydantic import BaseModel, Field
@@ -24,11 +29,74 @@ app = FastAPI(title="JARVIS Dev Local API", version="0.3.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://127.0.0.1:5173", "http://localhost:5173"],
-    allow_credentials=False,
+    allow_origins=os.getenv("CORS_ORIGINS", "http://127.0.0.1:5173,http://localhost:5173").split(","),
+    allow_credentials=True,
     allow_methods=["GET", "POST"],
     allow_headers=["Content-Type"],
 )
+
+
+# Bounded per-process limiter. Configure a shared edge limiter for multiple workers.
+_buckets = OrderedDict()
+_bucket_lock = Lock()
+def _limited(host: str) -> bool:
+    now = time.monotonic()
+    with _bucket_lock:
+        started, count = _buckets.pop(host, (now, 0))
+        if now - started >= 60:
+            started, count = now, 0
+        _buckets[host] = (started, count + 1)
+        while len(_buckets) > 10000:
+            _buckets.popitem(last=False)
+        return count >= 20
+
+@app.middleware("http")
+async def access_control(request: Request, call_next):
+    if request.url.path.startswith("/api/") and request.method != "OPTIONS":
+        host = request.client.host if request.client else ""
+        if request.method == "POST" and _limited(host):
+            return JSONResponse({"detail": "Muitas requisições. Aguarde um minuto."}, status_code=429, headers={"Retry-After": "60"})
+        if request.url.path not in {"/api/health", "/api/session"}:
+            token = os.getenv("CODAX_ACCESS_TOKEN", "")
+            local = host in {"127.0.0.1", "::1", "testclient"}
+            if not token and not local:
+                return JSONResponse({"detail": "Configure CODAX_ACCESS_TOKEN antes do acesso remoto."}, status_code=503)
+            if token:
+                supplied = request.headers.get("authorization", "").removeprefix("Bearer ")
+                cookie = request.cookies.get("codax_session", "")
+                valid_cookie = False
+                try:
+                    expiry, signature = cookie.split(".", 1)
+                    expected = hmac.new(token.encode(), ("codax:" + expiry).encode(), "sha256").hexdigest()
+                    valid_cookie = int(expiry) > time.time() and hmac.compare_digest(signature, expected)
+                except (ValueError, TypeError):
+                    pass
+                if not (hmac.compare_digest(supplied, token) or valid_cookie):
+                    return JSONResponse({"detail": "Autenticação necessária."}, status_code=401)
+                if valid_cookie and request.method == "POST":
+                    allowed = os.getenv("CORS_ORIGINS", "http://127.0.0.1:5173,http://localhost:5173").split(",")
+                    if request.headers.get("origin") not in allowed:
+                        return JSONResponse({"detail": "Origem não autorizada."}, status_code=403)
+    return await call_next(request)
+
+class SessionRequest(BaseModel):
+    token: str = Field(min_length=1, max_length=512)
+
+@app.post("/api/session")
+def session(payload: SessionRequest, request: Request, response: Response):
+    token = os.getenv("CODAX_ACCESS_TOKEN", "")
+    allowed = os.getenv("CORS_ORIGINS", "http://127.0.0.1:5173,http://localhost:5173").split(",")
+    if request.headers.get("origin") not in allowed:
+        raise HTTPException(status_code=403, detail="Origem não autorizada.")
+    if len(token) < 32:
+        raise HTTPException(status_code=503, detail="Configure um token de acesso com pelo menos 32 caracteres.")
+    if not hmac.compare_digest(payload.token, token):
+        raise HTTPException(status_code=401, detail="Token inválido.")
+    expiry = str(int(time.time()) + 3600)
+    signature = hmac.new(token.encode(), ("codax:" + expiry).encode(), "sha256").hexdigest()
+    response.set_cookie("codax_session", expiry + "." + signature, httponly=True, samesite="strict",
+                        secure=request.url.scheme == "https", max_age=3600)
+    return {"authenticated": True}
 
 
 class ChatRequest(BaseModel):

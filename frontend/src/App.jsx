@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { Activity, Bot, Code2, Github, Mic, MicOff, Send, ShieldCheck, Wifi, WifiOff, Volume2 } from "lucide-react";
 
-const API = "http://127.0.0.1:8765";
+const API = (import.meta.env.VITE_API_URL || "http://127.0.0.1:8765").replace(/\/$/, "");
 
 export default function App() {
+  const [accessToken, setAccessToken] = useState("");
+  const [accessStatus, setAccessStatus] = useState("");
   const [online, setOnline] = useState(false);
   const [aiConfigured, setAiConfigured] = useState(false);
   const [assistantMode, setAssistantMode] = useState("local");
@@ -16,7 +18,7 @@ export default function App() {
   const bottom = useRef(null);
 
   useEffect(() => {
-    fetch(`${API}/api/health`)
+    fetch(`${API}/api/health`, {credentials: "include"})
       .then(r => { if (!r.ok) throw new Error(); return r.json(); })
       .then(data => { setOnline(true); setAiConfigured(Boolean(data.ai_configured)); setAssistantMode(data.ai_configured ? "openai" : "local"); })
       .catch(() => { setOnline(false); setAiConfigured(false); });
@@ -39,7 +41,7 @@ export default function App() {
     setBusy(true);
     try {
       const response = await fetch(`${API}/api/chat`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
+        method: "POST", credentials: "include", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message: value })
       });
       const data = await response.json().catch(() => ({}));
@@ -85,6 +87,20 @@ export default function App() {
       <div className="status-card"><Code2 size={18}/><div><span>AMBIENTE</span><strong>Windows · VS Code</strong></div></div>
       <div className="status-card"><ShieldCheck size={18}/><div><span>SEGURANÇA</span><strong>Modo protegido</strong></div></div>
     </section>
+    <form className="composer" onSubmit={async e => {
+      e.preventDefault();
+      try {
+        const response = await fetch(`${API}/api/session`, {
+          method: "POST", credentials: "include", headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({token: accessToken})
+        });
+        setAccessStatus(response.ok ? "Acesso autorizado por 1 hora." : "Não foi possível autorizar o acesso.");
+      } catch { setAccessStatus("Servidor indisponível."); }
+      setAccessToken("");
+    }}>
+      <input type="password" value={accessToken} onChange={e => setAccessToken(e.target.value)} placeholder="Token de acesso remoto (se configurado)" aria-label="Token de acesso" maxLength={512}/>
+      <button type="submit">Autorizar acesso</button><span role="status">{accessStatus}</span>
+    </form>
     <section className="workspace">
       <aside className="sidebar"><div className="section-label">MÓDULOS</div><div className="nav-item active"><Bot size={17}/> Assistente</div><div className="nav-item disabled"><Code2 size={17}/> Análise de código <small>EM BREVE</small></div><div className="nav-item disabled"><Github size={17}/> GitHub <small>EM BREVE</small></div><div className="security-note"><ShieldCheck size={18}/><div><strong>Proteção ativa</strong><p>A IA conversa e orienta, mas ainda não executa comandos nem altera arquivos.</p></div></div></aside>
       <section className="chat-panel">
