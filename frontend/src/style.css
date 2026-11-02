@@ -6,3 +6,30 @@
 .memory-controls button{border:1px solid #294055;border-radius:7px;background:#101f2e;color:#a9d9ec;font-size:11px;padding:7px 10px;cursor:pointer}
 .memory-controls button:hover{border-color:#55c6e8}
 .memory-controls span{width:100%;font-size:10px;color:#8fa8b9}
+
+
+/* Read-only GitHub explorer */
+.sidebar button.nav-item{width:100%;text-align:left;border:1px solid transparent;background:transparent;cursor:pointer;font:inherit}
+.sidebar button.nav-item.active{background:#112a3b;border-color:#1b465d}
+.sidebar button.nav-item:hover{color:#8ce5ff}
+.github-panel{min-width:0;padding:20px;background:#0c1420;border:1px solid #1d2b3c;border-radius:12px}
+.github-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;border-bottom:1px solid #1d2b3c;padding-bottom:16px}
+.github-head h2{font-size:18px;margin:0 0 8px}
+.github-head p,.github-note{font-size:12px;line-height:1.6;color:#8da2b8}
+.github-head button{background:#123147;color:#81e5ff;border:1px solid #245a75;border-radius:8px;padding:9px 14px;cursor:pointer}
+.github-head button:disabled{opacity:.5;cursor:wait}
+.github-error{color:#ffb9ad;background:#391e28;border:1px solid #7b3b49;border-radius:8px;padding:10px;font-size:12px}
+.github-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px;margin:16px 0}
+.github-repo{display:flex;flex-direction:column;align-items:flex-start;gap:8px;min-width:0;text-align:left;padding:13px;cursor:pointer;background:#101d2c;border:1px solid #244055;border-radius:9px;color:#d7e8f8;font:inherit}
+.github-repo:hover,.github-repo.selected{border-color:#53c4e7;background:#102a3a}
+.github-repo strong{font-size:13px;overflow-wrap:anywhere}
+.github-repo span{font-size:11px;color:#9cafc4;line-height:1.5}
+.github-repo small{font-size:10px;color:#78dfbf}
+.github-repo:disabled{opacity:.65;cursor:wait}
+.github-details{margin:20px 0;padding:15px;background:#0b1b29;border:1px solid #24516b;border-radius:10px;overflow:hidden}
+.github-details h3{font-size:17px;overflow-wrap:anywhere}
+.github-details h4{font-size:13px;margin-top:18px}
+.github-details p{font-size:12px;color:#a9bdd1;line-height:1.6}
+.github-details a{font-size:12px;color:#77e0ff}
+.github-details pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:370px;overflow:auto;background:#09131d;border:1px solid #243c52;border-radius:8px;padding:12px;font-size:11px;line-height:1.6;color:#c7d8e8}
+@media(max-width:760px){.github-panel{padding:12px}.github-head{flex-wrap:wrap}.github-list{grid-template-columns:1fr}}
