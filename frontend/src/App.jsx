@@ -232,6 +232,17 @@ export default function App() {
           <h3>{githubDetails.name}</h3>
           <p>{githubDetails.description || "Sem descrição."}</p>
           <a href={githubDetails.html_url} target="_blank" rel="noopener noreferrer">Abrir repositório no GitHub</a>
+          {githubDetails.codax_profile && <section className="codax-repo-profile">
+            <h4>Perfil de revisão do Codax</h4>
+            <p><strong>Tipo:</strong> {githubDetails.codax_profile.project_kind}</p>
+            <h4>Arquivos principais</h4>
+            <ul>{githubDetails.codax_profile.entry_points.map(item => <li key={item}><code>{item}</code></li>)}</ul>
+            <h4>Comandos de teste (apenas referência, não são executados)</h4>
+            <ul>{githubDetails.codax_profile.test_commands.map(item => <li key={item}><code>{item}</code></li>)}</ul>
+            <h4>Pontos de atenção na revisão</h4>
+            <ul>{githubDetails.codax_profile.review_focus.map(item => <li key={item}>{item}</li>)}</ul>
+            <p className="github-note">Memória, leitura GitHub, revisão heurística e análise opcional com IA são fornecidas pelo Codax, não por este repositório. O Codax nunca executa os comandos acima.</p>
+          </section>}
           <h4>Prévia do README (texto)</h4>
           {githubDetails.readme_preview ? <pre>{githubDetails.readme_preview}</pre> : <p>Este repositório não tem um README disponível para prévia.</p>}
           {githubDetails.readme_truncated && <p>Prévia limitada a 8 KB. Consulte o arquivo completo no GitHub.</p>}

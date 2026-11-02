@@ -80,6 +80,24 @@ A aba **GitHub** do frontend lista até **100 repositórios públicos** da conta
 
 O Codax ainda **não interpreta automaticamente código**, não baixa projetos completos e não pode executar comandos. O modo GitHub é exclusivamente um leitor de metadados e README públicos.
 
+## Perfis de integração para múltiplos projetos
+
+Os projetos públicos podem incluir o arquivo opcional `.codax/project.json` na branch padrão. O Codax usa esse arquivo **apenas para exibir** o tipo de projeto, caminhos principais, comandos de teste e focos de revisão na aba GitHub. Ele **não executa comandos, scripts nem instruções do arquivo**.
+
+Formato (até 4 KB, UTF-8):
+
+```json
+{
+  "schema_version": 1,
+  "project_kind": "API Python",
+  "entry_points": ["src/main.py"],
+  "test_commands": ["python -m pytest -q"],
+  "review_focus": ["Validação de entrada", "Tratamento de erros"]
+}
+```
+
+Memória de conversa, navegação no GitHub, revisão heurística e análise opcional com IA continuam **centralizadas no Codax** e funcionam para os repositórios públicos compatíveis. Um perfil não instala inteligência artificial em outro projeto nem concede permissões. A leitura de código requer seleção explícita e o uso de IA externa requer consentimento específico por arquivo.
+
 ## Revisão de código selecionado
 
 Na aba **Revisão de código**, escolha um repositório público, depois um arquivo de código e pressione **Revisar arquivo selecionado**. A leitura do arquivo só acontece após esse comando explícito.

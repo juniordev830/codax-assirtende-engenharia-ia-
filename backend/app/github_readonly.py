@@ -1,5 +1,6 @@
 """Public, read-only GitHub integration. No GitHub credentials or write scopes."""
 import base64
+import json
 import os
 import re
 
@@ -15,6 +16,8 @@ HEADERS = {
 NAME_PATTERN = re.compile(r"[A-Za-z0-9_.-]{1,100}\Z")
 OWNER_PATTERN = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?\Z")
 README_PREVIEW_BYTES = 8000
+PROFILE_MAX_BYTES = 4096
+PROFILE_PATH = ".codax/project.json"
 
 
 def configured_owner() -> str:
@@ -86,6 +89,45 @@ async def list_public_repositories():
     return {"owner": owner, "repositories": repos, "limit": 100, "scope": "public-read-only"}
 
 
+def _clean_profile(document):
+    """Return inert presentation data only. Commands are shown, never executed."""
+    if not isinstance(document, dict) or document.get("schema_version") != 1:
+        return None
+    kind = document.get("project_kind")
+    if not isinstance(kind, str) or not 1 <= len(kind) <= 64:
+        return None
+    def clean_list(key, *, limit=8):
+        items = document.get(key)
+        if not isinstance(items, list) or len(items) > limit:
+            return []
+        return [item for item in items if isinstance(item, str)
+                and 0 < len(item) <= 280 and "\\x00" not in item][:limit]
+    return {
+        "schema_version": 1,
+        "project_kind": kind,
+        "entry_points": clean_list("entry_points"),
+        "test_commands": clean_list("test_commands"),
+        "review_focus": clean_list("review_focus"),
+    }
+
+
+def _decode_profile(data):
+    if not isinstance(data, dict) or data.get("type") != "file":
+        return None
+    size = data.get("size")
+    if not isinstance(size, int) or size < 1 or size > PROFILE_MAX_BYTES:
+        return None
+    if data.get("encoding") != "base64" or not isinstance(data.get("content"), str):
+        return None
+    try:
+        raw = base64.b64decode("".join(data["content"].split()), validate=True)
+        if len(raw) > PROFILE_MAX_BYTES:
+            return None
+        return _clean_profile(json.loads(raw.decode("utf-8")))
+    except (ValueError, TypeError, UnicodeDecodeError, base64.binascii.Error):
+        return None
+
+
 async def read_public_repository(name: str):
     if not NAME_PATTERN.fullmatch(name) or name in (".", ".."):
         raise HTTPException(status_code=422, detail="Nome de repositório inválido.")
@@ -96,6 +138,7 @@ async def read_public_repository(name: str):
         if repo is None:
             raise HTTPException(status_code=404, detail="Repositório público não encontrado.")
         readme_data = await _read(client, f"/repos/{owner}/{name}/readme", optional=True)
+        profile_data = await _read(client, f"/repos/{owner}/{name}/contents/{PROFILE_PATH}", optional=True)
 
     readme = ""
     if isinstance(readme_data, dict) and readme_data.get("encoding") == "base64":
@@ -105,4 +148,9 @@ async def read_public_repository(name: str):
                 readme = raw[:README_PREVIEW_BYTES].decode("utf-8", errors="replace")
             except (ValueError, TypeError, base64.binascii.Error):
                 readme = ""
-    return {**repo, "readme_preview": readme, "readme_truncated": len(readme.encode("utf-8")) >= README_PREVIEW_BYTES}
+    return {
+        **repo,
+        "readme_preview": readme,
+        "readme_truncated": len(readme.encode("utf-8")) >= README_PREVIEW_BYTES,
+        "codax_profile": _decode_profile(profile_data),
+    }
