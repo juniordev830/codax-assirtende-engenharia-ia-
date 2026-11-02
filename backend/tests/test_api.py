@@ -57,7 +57,11 @@ def test_chat_returns_mocked_ai_reply(monkeypatch):
 
     class FakeResponses:
         async def create(self, **kwargs):
-            assert kwargs["input"] == "Explique APIs REST"
+            assert kwargs["input"] == [
+                {"role": "user", "content": "Oi"},
+                {"role": "assistant", "content": "Olá!"},
+                {"role": "user", "content": "Explique APIs REST"},
+            ]
             assert kwargs["max_output_tokens"] == 900
             return FakeResponse()
 
@@ -73,7 +77,13 @@ def test_chat_returns_mocked_ai_reply(monkeypatch):
 
     monkeypatch.setattr(main, "AsyncOpenAI", FakeClient)
 
-    response = client.post("/api/chat", json={"message": "  Explique APIs REST  "})
+    response = client.post("/api/chat", json={
+        "message": "  Explique APIs REST  ",
+        "history": [
+            {"role": "user", "content": "Oi"},
+            {"role": "assistant", "content": "Olá!"},
+        ],
+    })
 
     assert response.status_code == 200
     assert response.json()["reply"] == "Resposta simulada para o teste."
