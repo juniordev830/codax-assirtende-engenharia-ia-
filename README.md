@@ -1,13 +1,14 @@
 # J.A.R.V.I.S. Dev
 
-Assistente de programação em português do Brasil, com interface React, API local FastAPI e integração com a OpenAI Responses API.
+Assistente de programação em português do Brasil, com interface React e API local FastAPI. Funciona em modo local sem chave ou, opcionalmente, com integração à OpenAI Responses API.
 
 ## Estado atual
 
 - API local com endpoint de saúde `GET /api/health`.
 - Endpoint de conversa `POST /api/chat` com validação de entrada.
 - Mensagens vazias ou formadas somente por espaços são rejeitadas.
-- Erros comuns da API externa são convertidos em mensagens controladas.
+- Sem `OPENAI_API_KEY`, o backend oferece respostas locais determinísticas para orientações básicas de Git, Python e Node.js.
+- Com `OPENAI_API_KEY`, o backend pode usar a OpenAI Responses API; esse uso é opcional e pode gerar custos.
 - Testes automatizados da API e execução via GitHub Actions.
 - A chave da API fica no backend e nunca deve ser colocada no frontend ou enviada ao GitHub.
 
@@ -18,14 +19,18 @@ Assistente de programação em português do Brasil, com interface React, API lo
 - Windows 10 ou superior
 - Python 3.10+
 - Node.js LTS
-- Chave da OpenAI API com uso habilitado (o uso da API é cobrado separadamente da assinatura ChatGPT)
+- Chave da OpenAI API apenas se quiser habilitar respostas generativas (uso da API é cobrado separadamente da assinatura ChatGPT)
 - VS Code (opcional)
 
 ## Configuração
 
-### 1. Configurar a chave da API
+### 1. Modo local sem chave (padrão)
 
-Na pasta `backend`, copie `.env.example` para `.env` e configure sua chave localmente:
+Você pode iniciar a aplicação sem configurar chave de IA. Nesse modo, o assistente responde a um conjunto limitado de orientações determinísticas e deixa claro que não é uma IA generativa. Não há cobrança de API.
+
+### 2. Habilitar respostas generativas (opcional)
+
+Se quiser usar a OpenAI, na pasta `backend`, copie `.env.example` para `.env` e configure sua chave localmente:
 
 ```dotenv
 OPENAI_API_KEY=sua_chave_real
@@ -34,7 +39,7 @@ OPENAI_MODEL=gpt-5.4-mini
 
 Nunca publique o arquivo `.env` nem compartilhe a chave. O arquivo está listado no `.gitignore`.
 
-### 2. Iniciar a API
+### 3. Iniciar a API
 
 No PowerShell, dentro de `backend`:
 
@@ -46,7 +51,7 @@ py -m venv .venv
 
 Teste `http://127.0.0.1:8765/api/health`. O campo `ai_configured` indica se a variável da chave foi carregada.
 
-### 3. Iniciar a interface
+### 4. Iniciar a interface
 
 Em outro terminal, na pasta `frontend`:
 
@@ -65,7 +70,7 @@ Na pasta `backend`:
 .\.venv\Scripts\python.exe -m pytest -q
 ```
 
-Os testes verificam o endpoint de saúde, o comportamento sem chave, a rejeição de mensagens em branco e uma resposta simulada da IA, sem consumir créditos da API.
+Os testes verificam o endpoint de saúde, o modo local sem chave, a rejeição de mensagens em branco e uma resposta simulada da IA, sem consumir créditos da API.
 
 O GitHub Actions executa os testes de backend em pushes para a branch principal e branches `feature/**), além de pull requests direcionados à principal.
 
@@ -74,7 +79,7 @@ O GitHub Actions executa os testes de backend em pushes para a branch principal 
 - `frontend/`: interface React/Vite e recursos de voz do navegador.
 - `backend/app/main.py`: API FastAPI, validação de mensagens e integração com a OpenAI.
 - `backend/tests/`: testes automatizados de contrato da API.
-- `.github/workflows/ci.yml`: verificação automatizada de testes.
+- `.github/workflows/ci.yml`: testes automatizados do backend e build do frontend.
 
 ## Próximas etapas
 

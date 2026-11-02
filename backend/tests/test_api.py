@@ -19,13 +19,25 @@ def test_health_reports_service_and_ai_configuration(monkeypatch):
     assert payload["model"]
 
 
-def test_chat_requires_api_key(monkeypatch):
+def test_chat_uses_local_mode_without_api_key(monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
     response = client.post("/api/chat", json={"message": "Ajude-me com Python"})
 
-    assert response.status_code == 503
-    assert "OPENAI_API_KEY" in response.json()["detail"]
+    assert response.status_code == 200
+    assert response.json()["mode"] == "local"
+    assert "pytest" in response.json()["reply"]
+    assert "OPENAI_API_KEY" not in response.json()["reply"]
+
+
+def test_local_mode_explains_its_limits(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    response = client.post("/api/chat", json={"message": "Oi"})
+
+    assert response.status_code == 200
+    assert response.json()["mode"] == "local"
+    assert "sem chave de API" in response.json()["reply"]
 
 
 def test_chat_rejects_blank_message(monkeypatch):

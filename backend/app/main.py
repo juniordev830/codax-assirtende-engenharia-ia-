@@ -45,6 +45,32 @@ def health():
     }
 
 
+def local_reply(message: str) -> str:
+    """Small deterministic helper for offline use; this is not a generative AI model."""
+    normalized = message.casefold()
+    if any(word in normalized for word in ("olá", "ola", "oi", "bom dia", "boa tarde", "boa noite")):
+        return "Olá! Estou no modo local, sem chave de API e sem cobrança de IA. Minhas respostas são limitadas e baseadas em regras simples."
+    if any(word in normalized for word in ("ajuda", "comandos", "o que você faz", "o que voce faz")):
+        return (
+            "Modo local ativo. Posso orientar sobre comandos comuns de desenvolvimento: "
+            "git status para ver alterações, pytest para testes Python, npm test para testes JavaScript "
+            "e npm run build para compilar um frontend. Ainda não executo esses comandos nem acesso seus arquivos."
+        )
+    if "git status" in normalized or "git" in normalized:
+        return "Para conferir o estado do repositório, abra o terminal na pasta do projeto e execute `git status`. Eu não executo o comando neste modo."
+    if "pytest" in normalized or "teste python" in normalized:
+        return "Para rodar os testes Python, entre na pasta do projeto e execute `python -m pytest -q`. Leia a saída para localizar testes que falharam."
+    if "npm" in normalized or "javascript" in normalized or "typescript" in normalized:
+        return "Em projetos Node.js, `npm install` instala dependências, `npm test` executa testes se houver script configurado e `npm run build` compila se o projeto definir esse script."
+    if "python" in normalized:
+        return "Para verificar a versão do Python, execute `python --version`. Para testar um projeto com pytest, use `python -m pytest -q`. Não compartilhe senhas nem tokens."
+    return (
+        "Estou funcionando no modo local, sem chamar uma IA externa. Minhas respostas offline são limitadas. "
+        "Posso ajudar com orientações básicas de Git, Python e Node.js; para análise generativa mais ampla, "
+        "a integração opcional com a API de IA pode ser configurada no backend."
+    )
+
+
 @app.post("/api/chat")
 async def chat(payload: ChatRequest):
     message = payload.message.strip()
@@ -53,13 +79,7 @@ async def chat(payload: ChatRequest):
 
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
-        raise HTTPException(
-            status_code=503,
-            detail=(
-                "A IA ainda não está configurada. Crie o arquivo backend/.env "
-                "com sua OPENAI_API_KEY e reinicie o backend. Não cole a chave no chat."
-            ),
-        )
+        return {"reply": local_reply(message), "mode": "local", "model": "rules"}
 
     try:
         async with AsyncOpenAI(api_key=api_key, timeout=45.0, max_retries=1) as client:
