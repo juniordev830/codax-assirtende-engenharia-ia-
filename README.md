@@ -12,6 +12,7 @@ Assistente de programação em português do Brasil, com interface React e API l
 - Testes automatizados da API, testes de memória no frontend e execução via GitHub Actions.
 - Conversas com contexto recente limitado: até 12 mensagens anteriores e 12.000 caracteres por requisição.
 - Histórico opcional no armazenamento deste navegador (máximo de 40 mensagens), com opção de apagar a conversa.
+- Explorador GitHub **somente de leitura** para listar repositórios públicos e consultar prévias de README (sem token GitHub).
 - A chave da API fica no backend e nunca deve ser colocada no frontend ou enviada ao GitHub.
 
 > O assistente ainda não executa comandos no computador, não lê arquivos locais nem altera projetos automaticamente. A interface não deve ser interpretada como prova de que essas funções existem.
@@ -64,6 +65,19 @@ npm run dev
 
 Abra o endereço local informado pelo Vite, normalmente `http://127.0.0.1:5173`.
 
+## GitHub: leitura de projetos públicos
+
+A aba **GitHub** do frontend lista até **100 repositórios públicos** da conta configurada em `CODAX_GITHUB_OWNER` (padrão: `juniordev830`) e permite abrir uma prévia em texto do README, limitada a 8 KB. Não existe paginação nesta primeira versão.
+
+- `GET /api/github/repos`: lista de repositórios públicos do usuário configurado.
+- `GET /api/github/repos/{repo_name}`: resumo e prévia do README público.
+- Consultas são feitas do **backend** exclusivamente para `https://api.github.com`, sem enviar senhas ou tokens do GitHub pelo navegador.
+- **Nenhuma rota de escrita** é criada: sem commits, exclusões, ações em issues ou pull requests; acesso a repositórios privados ainda não existe.
+- O controle de autenticação do Codax também protege essas rotas no acesso remoto. As consultas GitHub compartilham o limite local de 20 requisições por IP/minuto; limites de API pública do próprio GitHub continuam aplicáveis.
+- Não habilite uso remoto público sem configurar `CODAX_ACCESS_TOKEN`, HTTPS e as origens permitidas. Este recurso **não cria hospedagem**.
+
+O Codax ainda **não interpreta automaticamente código**, não baixa projetos completos e não pode executar comandos. O modo GitHub é exclusivamente um leitor de metadados e README públicos.
+
 ## Memória de conversa
 
 - Cada nova mensagem enviada pelo frontend inclui uma janela de **até 12 mensagens anteriores** e **12.000 caracteres**, validada também pelo backend. A mensagem atual tem limite de 4.000 caracteres.
@@ -103,7 +117,9 @@ python -m pytest -q
 
 - `frontend/`: interface React/Vite, recursos de voz e memória opcional do navegador.
 - `frontend/src/chatHistory.mjs`: limite, serialização e limpeza de contexto.
-- `frontend/tests/`: testes de memória executados por `npm test`.
+- `frontend/tests/`: testes de memória e dos clientes de API executados por `npm test`.
+- `frontend/src/githubApi.mjs`: cliente para navegação pública em projetos.
+- `backend/app/github_readonly.py`: chamadas públicas de leitura GitHub, com validação de nomes e respostas.
 - `backend/app/main.py`: API FastAPI, validação de mensagens e integração com a OpenAI.
 - `backend/tests/`: testes automatizados de contrato da API.
 - `.github/workflows/ci.yml`: testes automatizados do backend e build do frontend.
@@ -114,7 +130,7 @@ python -m pytest -q
 2. Implementar configuração de API por interface sem expor segredos.
 3. Criar análise de código em arquivos explicitamente selecionados.
 4. Planejar ações locais somente com aprovação explícita, logs e limites de segurança.
-5. Integrar GitHub por permissões mínimas e revisão antes de publicar alterações.
+5. Evoluir o explorador público para análise de código com seleção explícita de arquivos; planejar separadamente acesso privado por permissões mínimas e revisão antes de publicar alterações.
 
 ## Acesso por celular/tablet
 

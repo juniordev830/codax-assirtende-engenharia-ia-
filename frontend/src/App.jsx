@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Activity, Bot, Code2, Github, Mic, MicOff, Send, ShieldCheck, Wifi, WifiOff, Volume2 } from "lucide-react";
 import { buildContext, clearHistory, HISTORY_PREFERENCE_KEY, loadHistory, MAX_SAVED_MESSAGES, saveHistory } from "./chatHistory.mjs";
+import { getGithubRepositories, getGithubRepository } from "./githubApi.mjs";
 
 const API = (import.meta.env.VITE_API_URL || "http://127.0.0.1:8765").replace(/\/$/, "");
 const INITIAL_MESSAGES = [{
@@ -22,6 +23,14 @@ export default function App() {
   const [messages, setMessages] = useState(INITIAL_MESSAGES);
   const [rememberHistory, setRememberHistory] = useState(false);
   const [memoryNotice, setMemoryNotice] = useState("");
+  const [activeModule, setActiveModule] = useState("assistant");
+  const [githubOwner, setGithubOwner] = useState("");
+  const [githubRepos, setGithubRepos] = useState([]);
+  const [githubLoaded, setGithubLoaded] = useState(false);
+  const [githubLoading, setGithubLoading] = useState(false);
+  const [githubError, setGithubError] = useState("");
+  const [githubDetails, setGithubDetails] = useState(null);
+  const [githubDetailsLoading, setGithubDetailsLoading] = useState(false);
   const recognition = useRef(null);
   const bottom = useRef(null);
 
@@ -78,6 +87,40 @@ export default function App() {
 
   function appendMessage(turn) {
     setMessages(old => [...old, turn].slice(-MAX_SAVED_MESSAGES));
+  }
+
+  async function refreshGithub() {
+    setGithubLoading(true);
+    setGithubError("");
+    try {
+      const data = await getGithubRepositories(API);
+      setGithubOwner(data.owner);
+      setGithubRepos(data.repositories);
+      setGithubLoaded(true);
+      setGithubDetails(null);
+    } catch (error) {
+      setGithubError(error.message || "Não foi possível consultar o GitHub.");
+    } finally {
+      setGithubLoading(false);
+    }
+  }
+
+  function openGithub() {
+    setActiveModule("github");
+    if (!githubLoaded && !githubLoading) refreshGithub();
+  }
+
+  async function inspectGithubRepo(name) {
+    setGithubDetails(null);
+    setGithubDetailsLoading(true);
+    setGithubError("");
+    try {
+      setGithubDetails(await getGithubRepository(API, name));
+    } catch (error) {
+      setGithubError(error.message || "Não foi possível abrir o repositório.");
+    } finally {
+      setGithubDetailsLoading(false);
+    }
   }
 
   function speak(text) {
@@ -158,8 +201,8 @@ export default function App() {
       <button type="submit">Autorizar acesso</button><span role="status">{accessStatus}</span>
     </form>
     <section className="workspace">
-      <aside className="sidebar"><div className="section-label">MÓDULOS</div><div className="nav-item active"><Bot size={17}/> Assistente</div><div className="nav-item disabled"><Code2 size={17}/> Análise de código <small>EM BREVE</small></div><div className="nav-item disabled"><Github size={17}/> GitHub <small>EM BREVE</small></div><div className="security-note"><ShieldCheck size={18}/><div><strong>Proteção ativa</strong><p>A IA conversa e orienta, mas ainda não executa comandos nem altera arquivos.</p></div></div></aside>
-      <section className="chat-panel">
+      <aside className="sidebar"><div className="section-label">MÓDULOS</div><button type="button" className={`nav-item ${activeModule === "assistant" ? "active" : ""}`} onClick={() => setActiveModule("assistant")} aria-pressed={activeModule === "assistant"}><Bot size={17}/> Assistente</button><div className="nav-item disabled"><Code2 size={17}/> Análise de código <small>EM BREVE</small></div><button type="button" className={`nav-item ${activeModule === "github" ? "active" : ""}`} onClick={openGithub} aria-pressed={activeModule === "github"}><Github size={17}/> GitHub <small>LEITURA</small></button><div className="security-note"><ShieldCheck size={18}/><div><strong>Proteção ativa</strong><p>A IA conversa e orienta, mas ainda não executa comandos nem altera arquivos.</p></div></div></aside>
+      {activeModule === "assistant" ? <section className="chat-panel">
         <div className="chat-head"><div className="assistant-avatar"><Bot size={20}/></div><div><strong>J.A.R.V.I.S.</strong><span>{aiConfigured ? "IA conectada · programação em português" : assistantMode === "local" ? "Modo local · respostas básicas sem cobrança" : "Assistente de programação"}</span></div><button className={`icon-button ${voice ? "selected" : ""}`} title="Ativar/desativar respostas faladas" onClick={() => setVoice(v => !v)}><Volume2 size={18}/></button></div>
         <div className="memory-controls">
           <label><input type="checkbox" checked={rememberHistory} onChange={e => changeHistoryPreference(e.target.checked)}/> Salvar conversa neste navegador</label>
@@ -169,7 +212,31 @@ export default function App() {
         <div className="messages">{messages.map((item, i) => <div key={i} className={`message-row ${item.role}`}><div className="message-avatar">{item.role === "assistant" ? <Bot size={16}/> : "J"}</div><div className="bubble"><div className="bubble-label">{item.role === "assistant" ? "J.A.R.V.I.S." : "VOCÊ"}</div>{item.text}</div></div>)}{busy && <div className="typing">J.A.R.V.I.S. está pensando •••</div>}<div ref={bottom}/></div>
         <form className="composer" onSubmit={e => { e.preventDefault(); send(); }}><button type="button" className={`mic-button ${listening ? "listening" : ""}`} title="Falar em português" onClick={toggleMic}>{listening ? <MicOff size={19}/> : <Mic size={19}/>}</button><input value={message} onChange={e => setMessage(e.target.value)} maxLength={4000} placeholder="Digite uma instrução para o J.A.R.V.I.S..." aria-label="Mensagem"/><button className="send-button" type="submit" disabled={!message.trim() || busy} aria-label="Enviar"><Send size={17}/></button></form>
         <div className="footnote">A memória considera até 12 mensagens anteriores (12 mil caracteres) e é salva neste navegador somente com sua autorização. Não envie senhas, tokens ou chaves secretas no chat.</div>
-      </section>
+      </section> : <section className="github-panel">
+        <header className="github-head">
+          <div><h2>Projetos do GitHub</h2><p>Repositórios públicos de {githubOwner || "usuário configurado"} — consulta somente para leitura.</p></div>
+          <button type="button" onClick={refreshGithub} disabled={githubLoading}>{githubLoading ? "Consultando..." : "Atualizar"}</button>
+        </header>
+        {githubError && <p className="github-error" role="alert">{githubError} Em acesso remoto, autorize a sessão na aba Assistente.</p>}
+        {!githubLoading && githubLoaded && githubRepos.length === 0 && <p className="github-note">Nenhum repositório público encontrado.</p>}
+        <div className="github-list" aria-label="Lista de repositórios públicos">
+          {githubRepos.map(item => <button type="button" key={item.name} className={`github-repo ${githubDetails?.name === item.name ? "selected" : ""}`} onClick={() => inspectGithubRepo(item.name)} disabled={githubDetailsLoading}>
+            <strong>{item.name}</strong>
+            <span>{item.description || "Sem descrição"}</span>
+            <small>{item.language || "Linguagem não informada"}</small>
+          </button>)}
+        </div>
+        {githubDetailsLoading && <p className="github-note">Abrindo detalhes do repositório...</p>}
+        {githubDetails && <article className="github-details">
+          <h3>{githubDetails.name}</h3>
+          <p>{githubDetails.description || "Sem descrição."}</p>
+          <a href={githubDetails.html_url} target="_blank" rel="noopener noreferrer">Abrir repositório no GitHub</a>
+          <h4>Prévia do README (texto)</h4>
+          {githubDetails.readme_preview ? <pre>{githubDetails.readme_preview}</pre> : <p>Este repositório não tem um README disponível para prévia.</p>}
+          {githubDetails.readme_truncated && <p>Prévia limitada a 8 KB. Consulte o arquivo completo no GitHub.</p>}
+        </article>}
+        <p className="github-note">Esta integração não modifica arquivos, branches, issues ou pull requests. Não acessa repositórios privados.</p>
+      </section>}
     </section>
     <footer>J.A.R.V.I.S. DEV <span>v0.3.0 · MODO LOCAL + IA OPCIONAL</span></footer>
   </main>;
