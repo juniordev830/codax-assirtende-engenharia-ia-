@@ -9,7 +9,9 @@ Assistente de programação em português do Brasil, com interface React e API l
 - Mensagens vazias ou formadas somente por espaços são rejeitadas.
 - Sem `OPENAI_API_KEY`, o backend oferece respostas locais determinísticas para orientações básicas de Git, Python e Node.js.
 - Com `OPENAI_API_KEY`, o backend pode usar a OpenAI Responses API; esse uso é opcional e pode gerar custos.
-- Testes automatizados da API e execução via GitHub Actions.
+- Testes automatizados da API, testes de memória no frontend e execução via GitHub Actions.
+- Conversas com contexto recente limitado: até 12 mensagens anteriores e 12.000 caracteres por requisição.
+- Histórico opcional no armazenamento deste navegador (máximo de 40 mensagens), com opção de apagar a conversa.
 - A chave da API fica no backend e nunca deve ser colocada no frontend ou enviada ao GitHub.
 
 > O assistente ainda não executa comandos no computador, não lê arquivos locais nem altera projetos automaticamente. A interface não deve ser interpretada como prova de que essas funções existem.
@@ -62,6 +64,15 @@ npm run dev
 
 Abra o endereço local informado pelo Vite, normalmente `http://127.0.0.1:5173`.
 
+## Memória de conversa
+
+- Cada nova mensagem enviada pelo frontend inclui uma janela de **até 12 mensagens anteriores** e **12.000 caracteres**, validada também pelo backend. A mensagem atual tem limite de 4.000 caracteres.
+- A integração generativa opcional recebe esse contexto como mensagens de usuário/assistente. O **modo local sem API continua baseado em regras**: ele não gera respostas contextuais.
+- O histórico aparece durante a sessão. Marcar **Salvar conversa neste navegador** grava até 40 mensagens no armazenamento local do navegador. Essa opção vem **desativada por padrão** e não sincroniza entre dispositivos.
+- **Limpar conversa** apaga o histórico exibido e o histórico salvo neste navegador. Desativar o salvamento remove o histórico gravado, mas mantém as mensagens visíveis até limpar ou recarregar a página.
+- O backend **não persiste conversas**; o contexto é enviado pelo próprio navegador a cada chamada. Histórico salvo pode ser lido por quem tiver acesso ao mesmo perfil do navegador.
+- **Não envie senhas, tokens, credenciais ou outros segredos pelo chat.** Se a integração com a OpenAI estiver ativa, o contexto incluído na requisição é enviado à API externa.
+
 ## Testes automatizados
 
 Na pasta `backend`:
@@ -72,18 +83,34 @@ Na pasta `backend`:
 
 Os testes verificam o endpoint de saúde, o modo local sem chave, a rejeição de mensagens em branco e uma resposta simulada da IA, sem consumir créditos da API.
 
-O GitHub Actions executa os testes de backend em pushes para a branch principal e branches `feature/**), além de pull requests direcionados à principal.
+O GitHub Actions executa os testes do backend e do frontend (incluindo verificação de dependências e build). Para testar a memória no frontend:
+
+```powershell
+cd frontend
+npm test
+npm run build
+```
+
+Para testar o backend sem consumir créditos de IA:
+
+```powershell
+cd backend
+python -m pytest -q
+```
+
 
 ## Arquitetura
 
-- `frontend/`: interface React/Vite e recursos de voz do navegador.
+- `frontend/`: interface React/Vite, recursos de voz e memória opcional do navegador.
+- `frontend/src/chatHistory.mjs`: limite, serialização e limpeza de contexto.
+- `frontend/tests/`: testes de memória executados por `npm test`.
 - `backend/app/main.py`: API FastAPI, validação de mensagens e integração com a OpenAI.
 - `backend/tests/`: testes automatizados de contrato da API.
 - `.github/workflows/ci.yml`: testes automatizados do backend e build do frontend.
 
 ## Próximas etapas
 
-1. Adicionar histórico de conversa com limite de contexto.
+1. Evoluir o histórico local para sincronização segura entre dispositivos, caso seja necessário, com identidade própria e política de retenção.
 2. Implementar configuração de API por interface sem expor segredos.
 3. Criar análise de código em arquivos explicitamente selecionados.
 4. Planejar ações locais somente com aprovação explícita, logs e limites de segurança.
