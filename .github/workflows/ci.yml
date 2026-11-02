@@ -47,6 +47,8 @@ jobs:
           node-version: "20"
       - name: Install dependencies
         run: npm install
+      - name: Test conversation memory helpers
+        run: npm test
       - name: Audit frontend dependencies
         run: npm audit --audit-level=high
       - name: Build frontend
