@@ -13,6 +13,7 @@ Assistente de programação em português do Brasil, com interface React e API l
 - Conversas com contexto recente limitado: até 12 mensagens anteriores e 12.000 caracteres por requisição.
 - Histórico opcional no armazenamento deste navegador (máximo de 40 mensagens), com opção de apagar a conversa.
 - Explorador GitHub **somente de leitura** para listar repositórios públicos e consultar prévias de README (sem token GitHub).
+- Revisão inicial de código: seleção explícita de um arquivo público, visualização do texto e sugestões **heurísticas** com números de linha (sem executar código nem usar IA externa).
 - A chave da API fica no backend e nunca deve ser colocada no frontend ou enviada ao GitHub.
 
 > O assistente ainda não executa comandos no computador, não lê arquivos locais nem altera projetos automaticamente. A interface não deve ser interpretada como prova de que essas funções existem.
@@ -78,6 +79,18 @@ A aba **GitHub** do frontend lista até **100 repositórios públicos** da conta
 
 O Codax ainda **não interpreta automaticamente código**, não baixa projetos completos e não pode executar comandos. O modo GitHub é exclusivamente um leitor de metadados e README públicos.
 
+## Revisão de código selecionado
+
+Na aba **Revisão de código**, escolha um repositório público, depois um arquivo de código e pressione **Revisar arquivo selecionado**. A leitura do arquivo só acontece após esse comando explícito.
+
+- `GET /api/github/repos/{repo_name}/files`: enumera arquivos de código elegíveis na primeira árvore da branch padrão (até 200 nomes visíveis), sem arquivos ocultos ou caminhos com nomes típicos de credenciais.
+- `GET /api/github/repos/{repo_name}/source?path=...`: lê um único arquivo regular UTF-8 de até **32 KiB** após confirmar que o repositório pertence à conta configurada e é público.
+- Aceita extensões de código conhecidas, não executa scripts, não modifica repositórios, não lê arquivos privados nem usa token GitHub.
+- A revisão detecta **pistas simples** como `eval()`, execução dinâmica, `shell=True`, `os.system()`, HTML dinâmico, `TODO`, `FIXME` e exceções genéricas. As sugestões **não comprovam vulnerabilidades** e a ausência de achados não garante segurança.
+- O código analisado permanece no backend temporariamente durante a resposta e na visualização atual do navegador; **não é enviado a um modelo externo nem gravado na memória do chat**. Revogar acesso remoto exige encerrar a sessão correspondente no navegador.
+- A listagem pode recusar repositórios gigantes ou árvores incompletas. Não existem compilação, análise semântica, múltiplos arquivos, correções automáticas ou pull requests criadas pela aplicação.
+- Mesmo em arquivos públicos, não cole segredos ou dados pessoais no chat. Confira o repositório antes de publicar código.
+
 ## Memória de conversa
 
 - Cada nova mensagem enviada pelo frontend inclui uma janela de **até 12 mensagens anteriores** e **12.000 caracteres**, validada também pelo backend. A mensagem atual tem limite de 4.000 caracteres.
@@ -120,6 +133,9 @@ python -m pytest -q
 - `frontend/tests/`: testes de memória e dos clientes de API executados por `npm test`.
 - `frontend/src/githubApi.mjs`: cliente para navegação pública em projetos.
 - `backend/app/github_readonly.py`: chamadas públicas de leitura GitHub, com validação de nomes e respostas.
+- `backend/app/code_inspection.py`: listagem e revisão heurística de arquivos selecionados com limites estritos.
+- `frontend/src/CodeReviewPanel.jsx`: interface de revisão explícita e visualização segura de texto.
+- `frontend/src/codeReviewApi.mjs`: chamadas de revisão a partir do navegador.
 - `backend/app/main.py`: API FastAPI, validação de mensagens e integração com a OpenAI.
 - `backend/tests/`: testes automatizados de contrato da API.
 - `.github/workflows/ci.yml`: testes automatizados do backend e build do frontend.
@@ -130,7 +146,7 @@ python -m pytest -q
 2. Implementar configuração de API por interface sem expor segredos.
 3. Criar análise de código em arquivos explicitamente selecionados.
 4. Planejar ações locais somente com aprovação explícita, logs e limites de segurança.
-5. Evoluir o explorador público para análise de código com seleção explícita de arquivos; planejar separadamente acesso privado por permissões mínimas e revisão antes de publicar alterações.
+5. Evoluir a revisão heurística para análise semântica de múltiplos arquivos e correções propostas, somente com consentimento, revisão humana e limites de segurança; planejar acesso privado separadamente.
 
 ## Acesso por celular/tablet
 
