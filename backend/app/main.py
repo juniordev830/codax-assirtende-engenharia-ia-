@@ -11,7 +11,8 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from openai import APIConnectionError, APIStatusError, AuthenticationError, AsyncOpenAI, RateLimitError
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict, model_validator
+from typing import Literal
 
 load_dotenv()
 
@@ -102,8 +103,23 @@ def session(payload: SessionRequest, request: Request, response: Response):
     return {"authenticated": True}
 
 
+# Previous turns are supplied by the client, never stored on the server.
+# Strict role validation prevents callers from injecting system/developer roles.
+class ChatTurn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1, max_length=4000)
+
+
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=4000)
+    history: list[ChatTurn] = Field(default_factory=list, max_length=12)
+
+    @model_validator(mode="after")
+    def validate_history_budget(self):
+        if sum(len(turn.content) for turn in self.history) > 12000:
+            raise ValueError("O histórico ultrapassa o limite de 12000 caracteres.")
+        return self
 
 
 @app.get("/api/health")
@@ -159,7 +175,10 @@ async def chat(payload: ChatRequest):
             response = await client.responses.create(
                 model=MODEL,
                 instructions=SYSTEM_INSTRUCTIONS,
-                input=message,
+                input=[
+                    *[{"role": turn.role, "content": turn.content} for turn in payload.history],
+                    {"role": "user", "content": message},
+                ],
                 max_output_tokens=900,
             )
         answer = (response.output_text or "").strip()
