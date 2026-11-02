@@ -1,4 +1,5 @@
 import os
+import re
 from datetime import datetime, timezone
 
 from dotenv import load_dotenv
@@ -48,7 +49,8 @@ def health():
 def local_reply(message: str) -> str:
     """Small deterministic helper for offline use; this is not a generative AI model."""
     normalized = message.casefold()
-    if any(word in normalized for word in ("olá", "ola", "oi", "bom dia", "boa tarde", "boa noite")):
+    # Match greetings as whole words/phrases, not arbitrary substrings (e.g. "coisas").
+    if re.search(r"\b(?:olá|ola|oi|bom dia|boa tarde|boa noite)\b", normalized):
         return "Olá! Estou no modo local, sem chave de API e sem cobrança de IA. Minhas respostas são limitadas e baseadas em regras simples."
     if any(word in normalized for word in ("ajuda", "comandos", "o que você faz", "o que voce faz")):
         return (
