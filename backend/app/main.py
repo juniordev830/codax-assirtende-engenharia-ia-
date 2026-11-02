@@ -62,7 +62,10 @@ async def access_control(request: Request, call_next):
             if not token and not local:
                 return JSONResponse({"detail": "Configure CODAX_ACCESS_TOKEN antes do acesso remoto."}, status_code=503)
             if token:
-                supplied = request.headers.get("authorization", "").removeprefix("Bearer ")
+                if len(token) < 32:
+                    return JSONResponse({"detail": "Configure um token de acesso com pelo menos 32 caracteres."}, status_code=503)
+                authorization = request.headers.get("authorization", "")
+                supplied = authorization[7:] if authorization.startswith("Bearer ") else ""
                 cookie = request.cookies.get("codax_session", "")
                 valid_cookie = False
                 try:
@@ -71,7 +74,7 @@ async def access_control(request: Request, call_next):
                     valid_cookie = int(expiry) > time.time() and hmac.compare_digest(signature, expected)
                 except (ValueError, TypeError):
                     pass
-                if not (hmac.compare_digest(supplied, token) or valid_cookie):
+                if not (hmac.compare_digest(supplied.encode("utf-8"), token.encode("utf-8")) or valid_cookie):
                     return JSONResponse({"detail": "Autenticação necessária."}, status_code=401)
                 if valid_cookie and request.method == "POST":
                     allowed = os.getenv("CORS_ORIGINS", "http://127.0.0.1:5173,http://localhost:5173").split(",")
@@ -90,7 +93,7 @@ def session(payload: SessionRequest, request: Request, response: Response):
         raise HTTPException(status_code=403, detail="Origem não autorizada.")
     if len(token) < 32:
         raise HTTPException(status_code=503, detail="Configure um token de acesso com pelo menos 32 caracteres.")
-    if not hmac.compare_digest(payload.token, token):
+    if not hmac.compare_digest(payload.token.encode("utf-8"), token.encode("utf-8")):
         raise HTTPException(status_code=401, detail="Token inválido.")
     expiry = str(int(time.time()) + 3600)
     signature = hmac.new(token.encode(), ("codax:" + expiry).encode(), "sha256").hexdigest()
