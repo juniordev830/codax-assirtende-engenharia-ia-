@@ -88,3 +88,7 @@ O GitHub Actions executa os testes de backend em pushes para a branch principal 
 3. Criar análise de código em arquivos explicitamente selecionados.
 4. Planejar ações locais somente com aprovação explícita, logs e limites de segurança.
 5. Integrar GitHub por permissões mínimas e revisão antes de publicar alterações.
+
+## Acesso por celular/tablet
+
+Configure `VITE_API_URL` no frontend com a URL HTTPS do backend e `CORS_ORIGINS` no backend com a origem exata do frontend. Configure `CODAX_ACCESS_TOKEN` com um segredo aleatório de pelo menos 32 caracteres; informe-o no campo de autorização da interface. A sessão dura uma hora e usa cookie HttpOnly; o segredo não é salvo no armazenamento do navegador. Prefira frontend e API no mesmo site para compatibilidade dos cookies SameSite. Acesso remoto sem token é bloqueado. O limite é de 20 requisições POST por IP/minuto por processo; não confie em cabeçalhos de proxy não verificados. Não publique HTTP sem TLS. O suporte à configuração remota não cria hospedagem automaticamente.
