@@ -148,6 +148,7 @@ async def inspect_public_source(name: str, path: str):
         raise HTTPException(status_code=422, detail="Arquivos binários não podem ser analisados.")
     return {
         "repository": name, "path": path, "size": len(raw),
+        "sha": data.get("sha") if isinstance(data.get("sha"), str) else None,
         "content": source, "review": inspect_source(source, path),
         "scope": "read-only", "external_ai_used": False
     }

@@ -13,7 +13,8 @@ Assistente de programação em português do Brasil, com interface React e API l
 - Conversas com contexto recente limitado: até 12 mensagens anteriores e 12.000 caracteres por requisição.
 - Histórico opcional no armazenamento deste navegador (máximo de 40 mensagens), com opção de apagar a conversa.
 - Explorador GitHub **somente de leitura** para listar repositórios públicos e consultar prévias de README (sem token GitHub).
-- Revisão inicial de código: seleção explícita de um arquivo público, visualização do texto e sugestões **heurísticas** com números de linha (sem executar código nem usar IA externa).
+- Revisão inicial de código: seleção explícita de um arquivo público, visualização do texto e sugestões **heurísticas** com números de linha, gratuitas e sem IA externa.
+- Análise semântica opcional com IA: exige autorização específica por arquivo e pode gerar custos adicionais de API.
 - A chave da API fica no backend e nunca deve ser colocada no frontend ou enviada ao GitHub.
 
 > O assistente ainda não executa comandos no computador, não lê arquivos locais nem altera projetos automaticamente. A interface não deve ser interpretada como prova de que essas funções existem.
@@ -87,9 +88,21 @@ Na aba **Revisão de código**, escolha um repositório público, depois um arqu
 - `GET /api/github/repos/{repo_name}/source?path=...`: lê um único arquivo regular UTF-8 de até **32 KiB** após confirmar que o repositório pertence à conta configurada e é público.
 - Aceita extensões de código conhecidas, não executa scripts, não modifica repositórios, não lê arquivos privados nem usa token GitHub.
 - A revisão detecta **pistas simples** como `eval()`, execução dinâmica, `shell=True`, `os.system()`, HTML dinâmico, `TODO`, `FIXME` e exceções genéricas. As sugestões **não comprovam vulnerabilidades** e a ausência de achados não garante segurança.
-- O código analisado permanece no backend temporariamente durante a resposta e na visualização atual do navegador; **não é enviado a um modelo externo nem gravado na memória do chat**. Revogar acesso remoto exige encerrar a sessão correspondente no navegador.
-- A listagem pode recusar repositórios gigantes ou árvores incompletas. Não existem compilação, análise semântica, múltiplos arquivos, correções automáticas ou pull requests criadas pela aplicação.
+- Na **revisão local**, o código permanece no backend apenas durante a requisição e na visualização atual do navegador; **não é enviado a um modelo externo nem gravado na memória do chat**. A revisão opcional com IA, descrita abaixo, tem comportamento diferente. Revogar acesso remoto exige encerrar a sessão correspondente no navegador.
+- A listagem pode recusar repositórios gigantes ou árvores incompletas. Não existem compilação, análise de múltiplos arquivos, correções automáticas ou pull requests criadas pela aplicação.
 - Mesmo em arquivos públicos, não cole segredos ou dados pessoais no chat. Confira o repositório antes de publicar código.
+
+## Análise aprofundada opcional com IA
+
+Depois de executar a **revisão local**, o usuário pode marcar uma confirmação explícita e clicar em **Solicitar análise com IA**. Essa ação faz **uma requisição separada**. O consentimento não é permanente; o botão não executa automaticamente após selecionar um arquivo.
+
+- `POST /api/github/repos/{repo_name}/ai-review` recebe apenas o caminho, o SHA do arquivo visualizado e `confirmed_external_processing=true`. O backend **não confia no código enviado pelo navegador**: busca o arquivo público novamente, compara seu SHA e recusa alterações entre a prévia e o envio.
+- A chamada exige `OPENAI_API_KEY` configurada **somente no backend**. Sem essa chave, o servidor devolve 503 e a revisão local gratuita continua disponível.
+- Apenas arquivos públicos UTF-8 com até **12.000 caracteres** podem ser enviados. Nomes típicos de credenciais e alguns padrões de segredos no conteúdo são bloqueados; esse filtro é heurístico e **não garante detectar todas as informações sensíveis**. Leia o arquivo antes de confirmar.
+- Após a confirmação, o **conteúdo completo do único arquivo escolhido** é enviado à API externa da OpenAI, sob a conta de API configurada, para identificar possíveis problemas, explicar o código e sugerir correções **textuais**. **Pode haver custos cobrados separadamente da assinatura do ChatGPT.**
+- O arquivo é tratado como entrada não confiável nas instruções do modelo. A resposta é exibida como texto e pode conter erros; não há verificação automática do comportamento do programa nem execução de testes.
+- O Codax **não executa código, não escreve arquivos, não faz commits e não cria pull requests** por meio deste recurso. Não envia histórico de chat nem tokens ao provedor de análise.
+- A chamada é limitada pela proteção de acesso e pelo limitador atual do backend, que opera por processo. Antes de uma implantação pública, adicione quotas de gasto por usuário no provedor ou servidor e rate limiting compartilhado na borda.
 
 ## Memória de conversa
 
@@ -134,6 +147,7 @@ python -m pytest -q
 - `frontend/src/githubApi.mjs`: cliente para navegação pública em projetos.
 - `backend/app/github_readonly.py`: chamadas públicas de leitura GitHub, com validação de nomes e respostas.
 - `backend/app/code_inspection.py`: listagem e revisão heurística de arquivos selecionados com limites estritos.
+- `backend/app/ai_code_review.py`: revisão opcional de um arquivo pela OpenAI, somente com consentimento e sem ações de escrita.
 - `frontend/src/CodeReviewPanel.jsx`: interface de revisão explícita e visualização segura de texto.
 - `frontend/src/codeReviewApi.mjs`: chamadas de revisão a partir do navegador.
 - `backend/app/main.py`: API FastAPI, validação de mensagens e integração com a OpenAI.
@@ -146,7 +160,7 @@ python -m pytest -q
 2. Implementar configuração de API por interface sem expor segredos.
 3. Criar análise de código em arquivos explicitamente selecionados.
 4. Planejar ações locais somente com aprovação explícita, logs e limites de segurança.
-5. Evoluir a revisão heurística para análise semântica de múltiplos arquivos e correções propostas, somente com consentimento, revisão humana e limites de segurança; planejar acesso privado separadamente.
+5. Expandir a revisão semântica opcional de **um arquivo** para múltiplos arquivos com quotas, aprovação por arquivo e propostas de alteração revisáveis; planejar acesso privado separadamente.
 
 ## Acesso por celular/tablet
 

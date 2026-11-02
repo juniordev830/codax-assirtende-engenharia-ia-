@@ -16,6 +16,7 @@ from typing import Literal
 
 from app.github_readonly import list_public_repositories, read_public_repository
 from app.code_inspection import list_reviewable_files, inspect_public_source
+from app.ai_code_review import review_with_ai
 
 load_dotenv()
 
@@ -99,6 +100,19 @@ async def github_repository_files(repo_name: str):
 @app.get("/api/github/repos/{repo_name}/source")
 async def github_repository_source(repo_name: str, path: str):
     return await inspect_public_source(repo_name, path)
+
+
+class AIReviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    path: str = Field(min_length=1, max_length=220)
+    expected_sha: str = Field(min_length=40, max_length=40)
+    confirmed_external_processing: Literal[True]
+
+
+@app.post("/api/github/repos/{repo_name}/ai-review")
+async def github_ai_review(repo_name: str, payload: AIReviewRequest):
+    # The explicit confirmation and expected file SHA are mandatory.
+    return await review_with_ai(repo_name, payload.path, payload.expected_sha)
 
 
 @app.get("/api/github/repos/{repo_name}")

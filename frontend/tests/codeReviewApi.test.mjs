@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { listSourceFiles, reviewSelectedSource, validSourcePath } from "../src/codeReviewApi.mjs";
+import { listSourceFiles, reviewSelectedSource, requestAIReview, validSourcePath } from "../src/codeReviewApi.mjs";
 
 function response(status, data) {
   return { ok: status >= 200 && status < 300, json: async () => data };
@@ -68,5 +68,62 @@ test("client displays access errors and malformed responses", async () => {
     reviewSelectedSource("http://local", "project", "src/main.py", async () =>
       response(200, { path: "src/main.py", content: "ok" })
     ), /inválida/,
+  );
+});
+
+test("AI analysis refuses requests without explicit consent or a matching SHA", async () => {
+  const request = async () => { throw new Error("Network request must not run"); };
+  await assert.rejects(
+    requestAIReview("https://codax.test", "project", "src/main.py", "a".repeat(40), false, request),
+    /Confirme o envio/,
+  );
+  await assert.rejects(
+    requestAIReview("https://codax.test", "project", "src/main.py", "invalid", true, request),
+    /novamente o arquivo/,
+  );
+  await assert.rejects(
+    requestAIReview("https://codax.test", "project", "../secret.py", "a".repeat(40), true, request),
+    /válido/,
+  );
+});
+
+test("AI analysis sends only selected path, SHA, and consent through authenticated POST", async () => {
+  const calls = [];
+  const sha = "a".repeat(40);
+  const request = async (url, options) => {
+    calls.push({ url, options });
+    return response(200, {
+      path: "src/main.py", sha, analysis: "Sugestão com teste.",
+      external_ai_used: true, modified_files: false,
+    });
+  };
+  const result = await requestAIReview(
+    "https://codax.test", "project", "src/main.py", sha, true, request
+  );
+  assert.equal(result.analysis, "Sugestão com teste.");
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, "https://codax.test/api/github/repos/project/ai-review");
+  assert.equal(calls[0].options.method, "POST");
+  assert.equal(calls[0].options.credentials, "include");
+  assert.deepEqual(JSON.parse(calls[0].options.body), {
+    path: "src/main.py",
+    expected_sha: sha,
+    confirmed_external_processing: true,
+  });
+});
+
+test("AI review rejects invalid provider response and surfaces 503", async () => {
+  const sha = "b".repeat(40);
+  await assert.rejects(
+    requestAIReview("http://local", "project", "main.py", sha, true,
+      async () => response(503, { detail: "IA externa desativada." })),
+    /IA externa desativada/,
+  );
+  await assert.rejects(
+    requestAIReview("http://local", "project", "main.py", sha, true,
+      async () => response(200, {
+        path: "main.py", sha, analysis: "ok", external_ai_used: true, modified_files: true
+      })),
+    /inválida/,
   );
 });
