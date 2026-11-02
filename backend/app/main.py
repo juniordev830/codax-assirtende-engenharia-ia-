@@ -14,6 +14,8 @@ from openai import APIConnectionError, APIStatusError, AuthenticationError, Asyn
 from pydantic import BaseModel, Field, ConfigDict, model_validator
 from typing import Literal
 
+from app.github_readonly import list_public_repositories, read_public_repository
+
 load_dotenv()
 
 MODEL = os.getenv("OPENAI_MODEL", "gpt-5.4-mini")
@@ -55,7 +57,7 @@ def _limited(host: str) -> bool:
 async def access_control(request: Request, call_next):
     if request.url.path.startswith("/api/") and request.method != "OPTIONS":
         host = request.client.host if request.client else ""
-        if request.method == "POST" and _limited(host):
+        if (request.method == "POST" or request.url.path.startswith("/api/github/")) and _limited(host):
             return JSONResponse({"detail": "Muitas requisições. Aguarde um minuto."}, status_code=429, headers={"Retry-After": "60"})
         if request.url.path not in {"/api/health", "/api/session"}:
             token = os.getenv("CODAX_ACCESS_TOKEN", "")
@@ -82,6 +84,16 @@ async def access_control(request: Request, call_next):
                     if request.headers.get("origin") not in allowed:
                         return JSONResponse({"detail": "Origem não autorizada."}, status_code=403)
     return await call_next(request)
+
+@app.get("/api/github/repos")
+async def github_repositories():
+    return await list_public_repositories()
+
+
+@app.get("/api/github/repos/{repo_name}")
+async def github_repository(repo_name: str):
+    return await read_public_repository(repo_name)
+
 
 class SessionRequest(BaseModel):
     token: str = Field(min_length=1, max_length=512)
