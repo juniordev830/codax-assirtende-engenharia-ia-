@@ -1,9 +1,5 @@
 // Explicit, read-only source selection; content is never sent to an AI provider.
-const REPO_NAME = /^[A-Za-z0-9_.-]{1,100}$/;
-
-function validName(name) {
-  return typeof name === "string" && REPO_NAME.test(name) && ![".", ".."].includes(name);
-}
+import { validRepositoryName, readApiResult } from "./githubRequestUtils.mjs";
 
 export function validSourcePath(path) {
   if (typeof path !== "string" || !path || path.length > 220 || path.includes("\\") || path.includes("\0")) return false;
@@ -12,20 +8,14 @@ export function validSourcePath(path) {
   return /\.(?:py|js|jsx|ts|tsx|java|go|cs|c|cpp|h|hpp|rs|rb|php|sh|sql)$/i.test(path);
 }
 
-async function readResult(response) {
-  let result;
-  try { result = await response.json(); } catch { result = {}; }
-  if (!response.ok) throw new Error(typeof result.detail === "string" ? result.detail : "Não foi possível ler o arquivo.");
-  return result;
-}
 
 export async function listSourceFiles(api, repository, request = fetch) {
-  if (!validName(repository)) throw new Error("Repositório inválido.");
+  if (!validRepositoryName(repository)) throw new Error("Repositório inválido.");
   const response = await request(
     `${api}/api/github/repos/${encodeURIComponent(repository)}/files`,
     { credentials: "include" }
   );
-  const data = await readResult(response);
+  const data = await readApiResult(response, "Não foi possível ler o arquivo.");
   if (!Array.isArray(data.files)) throw new Error("Lista de arquivos inválida.");
   return {
     ...data,
@@ -36,10 +26,10 @@ export async function listSourceFiles(api, repository, request = fetch) {
 }
 
 export async function reviewSelectedSource(api, repository, path, request = fetch) {
-  if (!validName(repository) || !validSourcePath(path)) throw new Error("Selecione um arquivo válido.");
+  if (!validRepositoryName(repository) || !validSourcePath(path)) throw new Error("Selecione um arquivo válido.");
   const url = `${api}/api/github/repos/${encodeURIComponent(repository)}/source?path=${encodeURIComponent(path)}`;
   const response = await request(url, { credentials: "include" });
-  const data = await readResult(response);
+  const data = await readApiResult(response, "Não foi possível ler o arquivo.");
   if (data.path !== path || typeof data.content !== "string" || !Array.isArray(data.review?.findings)) {
     throw new Error("Resposta de análise inválida.");
   }
@@ -48,7 +38,7 @@ export async function reviewSelectedSource(api, repository, path, request = fetc
 
 
 export async function requestAIReview(api, repository, path, expectedSha, confirmed, request = fetch) {
-  if (!validName(repository) || !validSourcePath(path)) {
+  if (!validRepositoryName(repository) || !validSourcePath(path)) {
     throw new Error("Selecione um arquivo válido.");
   }
   if (typeof expectedSha !== "string" || !/^[a-fA-F0-9]{40}$/.test(expectedSha)) {
@@ -68,7 +58,7 @@ export async function requestAIReview(api, repository, path, expectedSha, confir
       confirmed_external_processing: true,
     }),
   });
-  const data = await readResult(response);
+  const data = await readApiResult(response, "Não foi possível ler o arquivo.");
   if (data.path !== path || data.sha?.toLowerCase() !== expectedSha.toLowerCase() ||
       typeof data.analysis !== "string" || data.external_ai_used !== true ||
       data.modified_files !== false) {
