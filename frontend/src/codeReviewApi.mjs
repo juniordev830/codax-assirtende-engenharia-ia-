@@ -45,3 +45,34 @@ export async function reviewSelectedSource(api, repository, path, request = fetc
   }
   return data;
 }
+
+
+export async function requestAIReview(api, repository, path, expectedSha, confirmed, request = fetch) {
+  if (!validName(repository) || !validSourcePath(path)) {
+    throw new Error("Selecione um arquivo válido.");
+  }
+  if (typeof expectedSha !== "string" || !/^[a-fA-F0-9]{40}$/.test(expectedSha)) {
+    throw new Error("Abra novamente o arquivo para confirmar sua versão.");
+  }
+  if (confirmed !== true) {
+    throw new Error("Confirme o envio do arquivo à API externa antes de continuar.");
+  }
+  const url = `${api}/api/github/repos/${encodeURIComponent(repository)}/ai-review`;
+  const response = await request(url, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      path,
+      expected_sha: expectedSha,
+      confirmed_external_processing: true,
+    }),
+  });
+  const data = await readResult(response);
+  if (data.path !== path || data.sha?.toLowerCase() !== expectedSha.toLowerCase() ||
+      typeof data.analysis !== "string" || data.external_ai_used !== true ||
+      data.modified_files !== false) {
+    throw new Error("Resposta inválida do provedor de análise.");
+  }
+  return data;
+}
