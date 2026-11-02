@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Activity, Bot, Code2, Github, Mic, MicOff, Send, ShieldCheck, Wifi, WifiOff, Volume2 } from "lucide-react";
 import { buildContext, clearHistory, HISTORY_PREFERENCE_KEY, loadHistory, MAX_SAVED_MESSAGES, saveHistory } from "./chatHistory.mjs";
 import { downloadConversation } from "./chatExport.mjs";
+import { createChatRequestGate } from "./chatRequestGate.mjs";
 import { getGithubRepositories, getGithubRepository } from "./githubApi.mjs";
 import CodeReviewPanel from "./CodeReviewPanel.jsx";
 
@@ -35,6 +36,8 @@ export default function App() {
   const [githubDetailsLoading, setGithubDetailsLoading] = useState(false);
   const recognition = useRef(null);
   const bottom = useRef(null);
+  const chatRequest = useRef(null);
+  if (!chatRequest.current) chatRequest.current = createChatRequestGate();
 
   useEffect(() => {
     try {
@@ -65,6 +68,7 @@ export default function App() {
       .catch(() => { setOnline(false); setAiConfigured(false); });
   }, []);
   useEffect(() => { bottom.current?.scrollIntoView({ behavior: "smooth" }); }, [messages, busy]);
+  useEffect(() => () => { chatRequest.current.cancel(); }, []);
 
   function changeHistoryPreference(enabled) {
     try {
@@ -82,6 +86,9 @@ export default function App() {
   }
 
   function resetConversation() {
+    chatRequest.current.cancel();
+    setBusy(false);
+    if ("speechSynthesis" in window) window.speechSynthesis.cancel();
     setMessages(INITIAL_MESSAGES);
     try { clearHistory(window.localStorage); } catch { /* Storage may be blocked. */ }
     setMemoryNotice("Conversa limpa. O histórico anterior não será enviado à IA.");
@@ -95,6 +102,12 @@ export default function App() {
 
   function appendMessage(turn) {
     setMessages(old => [...old, turn].slice(-MAX_SAVED_MESSAGES));
+  }
+
+  function cancelResponse() {
+    if (!chatRequest.current.cancel()) return;
+    setBusy(false);
+    appendMessage({ role: "assistant", kind: "notice", text: "Resposta cancelada." });
   }
 
   async function refreshGithub() {
@@ -142,6 +155,8 @@ export default function App() {
   async function send(text = message) {
     const value = text.trim();
     if (!value || busy) return;
+    const request = chatRequest.current.start();
+    if (!request) return;
     const history = buildContext(messages);
     appendMessage({ role: "user", text: value });
     setMessage("");
@@ -149,9 +164,10 @@ export default function App() {
     try {
       const response = await fetch(`${API}/api/chat`, {
         method: "POST", credentials: "include", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: value, history })
+        body: JSON.stringify({ message: value, history }), signal: request.signal
       });
       const data = await response.json().catch(() => ({}));
+      if (!chatRequest.current.isCurrent(request)) return;
       if (!response.ok) {
         if (response.status === 503 && !aiConfigured) setAiConfigured(false);
         throw new Error(data.detail || "Não foi possível obter resposta da IA.");
@@ -162,8 +178,12 @@ export default function App() {
       appendMessage({ role: "assistant", text: data.reply });
       speak(data.reply);
     } catch (error) {
-      appendMessage({ role: "assistant", kind: "notice", text: error.message || "Não consegui acessar a API local. Confira se o FastAPI está rodando na porta 8765." });
-    } finally { setBusy(false); }
+      if (chatRequest.current.isCurrent(request)) {
+        appendMessage({ role: "assistant", kind: "notice", text: error.message || "Não consegui acessar a API local. Confira se o FastAPI está rodando na porta 8765." });
+      }
+    } finally {
+      if (chatRequest.current.finish(request)) setBusy(false);
+    }
   }
 
   function toggleMic() {
@@ -216,6 +236,7 @@ export default function App() {
           <label><input type="checkbox" checked={rememberHistory} onChange={e => changeHistoryPreference(e.target.checked)}/> Salvar conversa neste navegador</label>
           <button type="button" onClick={resetConversation}>Limpar conversa</button>
           <button type="button" onClick={exportConversation} disabled={busy || !messages.some(item => item.role === "user" && typeof item.text === "string" && item.text.trim())}>Baixar conversa</button>
+          {busy && <button type="button" onClick={cancelResponse}>Cancelar resposta</button>}
           <span role="status">{memoryNotice}</span>
         </div>
         <div className="messages">{messages.map((item, i) => <div key={i} className={`message-row ${item.role}`}><div className="message-avatar">{item.role === "assistant" ? <Bot size={16}/> : "J"}</div><div className="bubble"><div className="bubble-label">{item.role === "assistant" ? "J.A.R.V.I.S." : "VOCÊ"}</div>{item.text}</div></div>)}{busy && <div className="typing">J.A.R.V.I.S. está pensando •••</div>}<div ref={bottom}/></div>
