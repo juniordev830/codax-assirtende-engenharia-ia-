@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Activity, Bot, Code2, Github, Mic, MicOff, Send, ShieldCheck, Wifi, WifiOff, Volume2 } from "lucide-react";
 import { buildContext, clearHistory, HISTORY_PREFERENCE_KEY, loadHistory, MAX_SAVED_MESSAGES, saveHistory } from "./chatHistory.mjs";
+import { downloadConversation } from "./chatExport.mjs";
 import { getGithubRepositories, getGithubRepository } from "./githubApi.mjs";
 import CodeReviewPanel from "./CodeReviewPanel.jsx";
 
@@ -84,6 +85,12 @@ export default function App() {
     setMessages(INITIAL_MESSAGES);
     try { clearHistory(window.localStorage); } catch { /* Storage may be blocked. */ }
     setMemoryNotice("Conversa limpa. O histórico anterior não será enviado à IA.");
+  }
+
+  function exportConversation() {
+    setMemoryNotice(downloadConversation(messages)
+      ? "Download iniciado. O arquivo contém a conversa exibida."
+      : "Não foi possível baixar a conversa neste navegador.");
   }
 
   function appendMessage(turn) {
@@ -208,6 +215,7 @@ export default function App() {
         <div className="memory-controls">
           <label><input type="checkbox" checked={rememberHistory} onChange={e => changeHistoryPreference(e.target.checked)}/> Salvar conversa neste navegador</label>
           <button type="button" onClick={resetConversation}>Limpar conversa</button>
+          <button type="button" onClick={exportConversation} disabled={busy || !messages.some(item => item.role === "user" && typeof item.text === "string" && item.text.trim())}>Baixar conversa</button>
           <span role="status">{memoryNotice}</span>
         </div>
         <div className="messages">{messages.map((item, i) => <div key={i} className={`message-row ${item.role}`}><div className="message-avatar">{item.role === "assistant" ? <Bot size={16}/> : "J"}</div><div className="bubble"><div className="bubble-label">{item.role === "assistant" ? "J.A.R.V.I.S." : "VOCÊ"}</div>{item.text}</div></div>)}{busy && <div className="typing">J.A.R.V.I.S. está pensando •••</div>}<div ref={bottom}/></div>
