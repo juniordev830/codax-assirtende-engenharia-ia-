@@ -62,3 +62,10 @@
 .ai-analysis-result{margin-top:14px;background:#0a1926;padding:12px;border:1px solid #345d6e;border-radius:9px}
 .ai-analysis-result pre{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;font-size:12px;line-height:1.75;color:#c9dff0;max-height:600px;overflow:auto}
 @media(max-width:760px){.ai-code-review{padding:10px}}
+
+
+.codax-repo-profile{border:1px solid #2e566d;background:#102133;border-radius:9px;padding:12px;margin:14px 0}
+.codax-repo-profile h4{color:#96dfff;margin:14px 0 7px}
+.codax-repo-profile ul{padding-left:23px;margin:5px 0;font-size:12px;line-height:1.65;color:#d1dfeb}
+.codax-repo-profile li{overflow-wrap:anywhere}
+.codax-repo-profile code{white-space:pre-wrap;overflow-wrap:anywhere;color:#b9f4ce}
