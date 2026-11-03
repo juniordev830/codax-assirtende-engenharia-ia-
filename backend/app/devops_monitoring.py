@@ -28,3 +28,18 @@ def summarize_pipelines(pipelines):
         "counts": result,
         "successRate": round(result["success"] / completed * 100, 2) if completed else None,
     }
+
+
+def workflow_status(state, conclusion):
+    """Map only known upstream states; absent or new states remain unknown."""
+    if not isinstance(state, str):
+        return "unknown"
+    if state in {"queued", "in_progress", "waiting", "pending", "requested"}:
+        return "running"
+    if state != "completed" or not isinstance(conclusion, str):
+        return "unknown"
+    if conclusion == "success":
+        return "success"
+    if conclusion in {"failure", "timed_out", "startup_failure"}:
+        return "failure"
+    return "unknown"

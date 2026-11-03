@@ -4,18 +4,18 @@ No token, write operation, or user-supplied URL. Failures never imply a healthy 
 """
 from fastapi import HTTPException
 from app.github_readonly import (
-    NAME_PATTERN, configured_owner, _client_factory, _read, _public_repo,
+    NAME_PATTERN, configured_owner, _client_factory, _read,
 )
-from app.devops_monitoring import summarize_pipelines
+from app.devops_monitoring import summarize_pipelines, workflow_status
 
 async def public_workflow_status(repo_name: str):
     if not NAME_PATTERN.fullmatch(repo_name) or repo_name in (".", ".."):
         raise HTTPException(status_code=422, detail="Nome de repositório inválido.")
     owner = configured_owner()
     async with _client_factory() as client:
-        metadata = await _read(client, f"/repos/{owner}/{repo_name}")
-        if _public_repo(metadata, owner) is None:
-            raise HTTPException(status_code=404, detail="Repositório público não encontrado.")
+        # This fixed-owner endpoint is called without Authorization or redirects.
+        # GitHub itself returns 404 for inaccessible/private repositories. A separate
+        # metadata request would double quota use without granting extra access.
         payload = await _read(
             client, f"/repos/{owner}/{repo_name}/actions/runs",
             params={"per_page": 30, "page": 1},
@@ -28,9 +28,7 @@ async def public_workflow_status(repo_name: str):
             continue
         state = item.get("status")
         conclusion = item.get("conclusion")
-        status = ("running" if state != "completed"
-                  else "success" if conclusion == "success"
-                  else "failure" if conclusion else "unknown")
+        status = workflow_status(state, conclusion)
         runs.append({
             "id": item.get("id"),
             "repository": repo_name,
