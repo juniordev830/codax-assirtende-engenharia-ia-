@@ -203,6 +203,37 @@ def health():
     }
 
 
+@app.get("/api/capabilities")
+def capabilities():
+    """Contrato compacto para clientes descobrirem os recursos disponíveis."""
+    return {
+        "service": "jarvis-dev-local",
+        "api_version": "0.3.0",
+        "ai": {
+            "configured": bool(os.getenv("OPENAI_API_KEY")),
+            "model": MODEL if os.getenv("OPENAI_API_KEY") else "rules",
+        },
+        "github": {
+            "read_only": True,
+            "repository_listing": True,
+            "source_inspection": True,
+            "single_file_ai_review": True,
+            "multi_file_review": True,
+            "diff_proposal_preview_only": True,
+        },
+        "limits": {
+            "chat_history_turns": 12,
+            "chat_history_characters": 12000,
+            "review_batch_files": 3,
+            "rate_limit_per_host_per_minute": 20,
+        },
+        "authentication": {
+            "bearer_or_session_cookie": True,
+            "session_ttl_seconds": 3600,
+        },
+    }
+
+
 def local_reply(message: str) -> str:
     """Small deterministic helper for offline use; this is not a generative AI model."""
     normalized = message.casefold()
