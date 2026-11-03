@@ -6,6 +6,7 @@ import { createChatRequestGate } from "./chatRequestGate.mjs";
 import { getGithubRepositories, getGithubRepository } from "./githubApi.mjs";
 import CodeReviewPanel from "./CodeReviewPanel.jsx";
 import MultiReviewPanel from "./MultiReviewPanel.jsx";
+import DevOpsMonitorPanel from "./DevOpsMonitorPanel.jsx";
 
 const API = (import.meta.env.VITE_API_URL || "http://127.0.0.1:8765").replace(/\/$/, "");
 const INITIAL_MESSAGES = [{
@@ -250,6 +251,7 @@ export default function App() {
         </header>
         {githubError && <p className="github-error" role="alert">{githubError} Em acesso remoto, autorize a sessão na aba Assistente.</p>}
         {!githubLoading && githubLoaded && githubRepos.length === 0 && <p className="github-note">Nenhum repositório público encontrado.</p>}
+        {githubLoaded && githubRepos.length > 0 && <DevOpsMonitorPanel apiBase={API} repositories={githubRepos}/>}
         <div className="github-list" aria-label="Lista de repositórios públicos">
           {githubRepos.map(item => <button type="button" key={item.name} className={`github-repo ${githubDetails?.name === item.name ? "selected" : ""}`} onClick={() => inspectGithubRepo(item.name)} disabled={githubDetailsLoading}>
             <strong>{item.name}</strong>
