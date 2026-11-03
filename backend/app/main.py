@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field, ConfigDict, model_validator
 from typing import Literal
 
 from app.github_readonly import list_public_repositories, read_public_repository
+from app.github_actions_monitoring import public_workflow_status
 from app.code_inspection import list_reviewable_files, inspect_public_source
 from app.ai_code_review import review_with_ai
 from app.multi_file_review import review_multiple_locally, propose_multifile_diff
@@ -93,6 +94,11 @@ async def access_control(request: Request, call_next):
 @app.get("/api/github/repos")
 async def github_repositories():
     return await list_public_repositories()
+
+
+@app.get("/api/github/repos/{repo_name}/actions")
+async def github_actions_status(repo_name: str):
+    return await public_workflow_status(repo_name)
 
 
 @app.get("/api/github/repos/{repo_name}/files")
