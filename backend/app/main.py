@@ -48,7 +48,7 @@ app.add_middleware(
 # Bounded per-process limiter. Configure a shared edge limiter for multiple workers.
 _buckets = OrderedDict()
 _bucket_lock = Lock()
-def _limited(host: str) -> bool:
+def _limited(host: str, limit: int = 20) -> bool:
     now = time.monotonic()
     with _bucket_lock:
         started, count = _buckets.pop(host, (now, 0))
@@ -57,13 +57,13 @@ def _limited(host: str) -> bool:
         _buckets[host] = (started, count + 1)
         while len(_buckets) > 10000:
             _buckets.popitem(last=False)
-        return count >= 20
+        return count >= limit
 
 @app.middleware("http")
 async def access_control(request: Request, call_next):
     if request.url.path.startswith("/api/") and request.method != "OPTIONS":
         host = request.client.host if request.client else ""
-        if (request.method == "POST" or request.url.path.startswith("/api/github/")) and _limited(host):
+        if (request.method == "POST" or request.url.path.startswith("/api/github/")) and _limited(host, 60 if request.method == "GET" else 20):
             return JSONResponse({"detail": "Muitas requisições. Aguarde um minuto."}, status_code=429, headers={"Retry-After": "60"})
         if request.url.path not in {"/api/health", "/api/session"}:
             token = os.getenv("CODAX_ACCESS_TOKEN", "")
