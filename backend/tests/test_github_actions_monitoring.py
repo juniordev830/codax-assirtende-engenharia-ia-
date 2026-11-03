@@ -1,7 +1,7 @@
 """Mocked public GitHub Actions integration tests (no network)."""
 import httpx
 from fastapi.testclient import TestClient
-from app import github_readonly, main
+from app import github_actions_monitoring, main
 
 def test_actions_returns_live_runs_without_token(monkeypatch):
     monkeypatch.setenv("CODAX_GITHUB_OWNER", "juniordev830")
@@ -17,7 +17,7 @@ def test_actions_returns_live_runs_without_token(monkeypatch):
         return httpx.Response(200, json={
             "owner": {"login": "juniordev830"}, "name": "codax", "private": False,
         })
-    monkeypatch.setattr(github_readonly, "_client_factory",
+    monkeypatch.setattr(github_actions_monitoring, "_client_factory",
                         lambda: httpx.AsyncClient(transport=httpx.MockTransport(handler)))
     with TestClient(main.app) as client:
         response = client.get("/api/github/repos/codax/actions")
