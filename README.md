@@ -122,6 +122,17 @@ Depois de executar a **revisão local**, o usuário pode marcar uma confirmaçã
 - O Codax **não executa código, não escreve arquivos, não faz commits e não cria pull requests** por meio deste recurso. Não envia histórico de chat nem tokens ao provedor de análise.
 - A chamada é limitada pela proteção de acesso e pelo limitador atual do backend, que opera por processo. Antes de uma implantação pública, adicione quotas de gasto por usuário no provedor ou servidor e rate limiting compartilhado na borda.
 
+## Revisão de múltiplos arquivos e propostas de diff
+
+Na aba **Revisão múltipla** do Codax, selecione um repositório público e até **3 arquivos** de código. A revisão local busca os arquivos escolhidos, valida os SHAs, mostra o conteúdo e apresenta observações heurísticas, sem qualquer chave ou cobrança de API.
+
+- `POST /api/github/repos/{repo_name}/review-batch`: recebe `files` com `path` e `expected_sha` de 1 a 3 arquivos e devolve suas prévias e observações. O limite conjunto é de **18.000 caracteres**, sem uso de IA externa.
+- Somente depois de examinar os conteúdos, o usuário pode marcar o consentimento para o envio de até **12.000 caracteres no total** à OpenAI, e clicar em **Gerar proposta de diff**. O uso da API gera cobrança separada da assinatura do ChatGPT e depende de `OPENAI_API_KEY` no backend.
+- `POST /api/github/repos/{repo_name}/diff-proposal`: exige `files`, `confirmed_external_processing=true` e `preview_only=true`. Recarrega cada arquivo do GitHub público, compara os SHAs e bloqueia o envio se algum deles mudou, está vazio ou contém padrões de prováveis credenciais.
+- O modelo é instruído a devolver **no máximo duas propostas pequenas**, apenas para caminhos exatos já selecionados. O backend valida a resposta e calcula os diffs unificados com `difflib`; arquivos novos ou alterações excessivas são recusados.
+- **Não existe endpoint de aplicação das propostas**, nem execução de comandos, commits, alteração de branches ou criação automática de PRs. A visualização do código e do diff é texto não executável; os resultados precisam ser revisados e testados manualmente.
+- Os filtros de segredos e a análise com IA são imperfeitos: podem não identificar dados sensíveis, erros de segurança ou alterações incorretas. Não envie conteúdo confidencial e, em uma implantação remota, configure cotas de gastos e limites de acesso adequados.
+
 ## Memória de conversa
 
 - Cada nova mensagem enviada pelo frontend inclui uma janela de **até 12 mensagens anteriores** e **12.000 caracteres**, validada também pelo backend. A mensagem atual tem limite de 4.000 caracteres.
@@ -168,6 +179,8 @@ python -m pytest -q
 - `backend/app/github_readonly.py`: chamadas públicas de leitura GitHub, com validação de nomes e respostas.
 - `backend/app/code_inspection.py`: listagem e revisão heurística de arquivos selecionados com limites estritos.
 - `backend/app/ai_code_review.py`: revisão opcional de um arquivo pela OpenAI, somente com consentimento e sem ações de escrita.
+- `backend/app/multi_file_review.py`: revisão local de até três arquivos e conversão de propostas de IA em diffs validados.
+- `frontend/src/MultiReviewPanel.jsx` e `frontend/src/multiReviewApi.mjs`: seleção explícita, consentimento e apresentação de diffs sem aplicação.
 - `frontend/src/CodeReviewPanel.jsx`: interface de revisão explícita e visualização segura de texto.
 - `frontend/src/codeReviewApi.mjs`: chamadas de revisão a partir do navegador.
 - `backend/app/main.py`: API FastAPI, validação de mensagens e integração com a OpenAI.
@@ -180,7 +193,7 @@ python -m pytest -q
 2. Implementar configuração de API por interface sem expor segredos.
 3. Criar análise de código em arquivos explicitamente selecionados.
 4. Planejar ações locais somente com aprovação explícita, logs e limites de segurança.
-5. Expandir a revisão semântica opcional de **um arquivo** para múltiplos arquivos com quotas, aprovação por arquivo e propostas de alteração revisáveis; planejar acesso privado separadamente.
+5. Validar o fluxo de diffs em ambiente real, adicionar cotas de uso por identidade e, numa etapa separada, estudar aplicação em branches com revisão humana e rollback; acesso privado requer autenticação e permissões específicas.
 
 ## Acesso por celular/tablet
 
