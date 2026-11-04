@@ -129,6 +129,21 @@ Legenda: a coluna **situação observada** descreve exclusivamente a **estrutura
 | 59 | [`voluntariado-hub`](https://github.com/juniordev830/voluntariado-hub) | Somente README (conceito) |
 | 60 | [`web-dashboard-ts`](https://github.com/juniordev830/web-dashboard-ts) | Código ou infraestrutura presente |
 
+## Atualização de execução — 04/11/2026
+
+Esta seção registra **código e testes reais em PRs ainda não integrados**, não uma declaração de prontidão para produção:
+
+| Repositório | Entrega na branch | Validação |
+|---|---|---|
+| [controle-gastos-residenciais — PR #14](https://github.com/juniordev830/controle-gastos-residenciais/pull/14) | Consulta GET por ID de pessoas e transações, testes HTTP 404/401 e documentação | [CI aprovado no último commit da PR](https://github.com/juniordev830/controle-gastos-residenciais/actions/runs/41825911351) |
+| [controle-gastos-residenciais — PR #15](https://github.com/juniordev830/controle-gastos-residenciais/pull/15) | Modo de autenticação obrigatória com falha segura, rejeição de cabeçalhos ambíguos, respostas sem cache e limite de requisição de 16 KiB | [CI aprovado com o teste HTTP 413](https://github.com/juniordev830/controle-gastos-residenciais/actions/runs/41830217559) |
+| [payment-service-java — PR #16](https://github.com/juniordev830/payment-service-java/pull/16) | Rejeição de Authorization duplicado, no-store e cabeçalhos de proteção HTTP; mensagens de falha de configuração genéricas | [CI aprovado](https://github.com/juniordev830/payment-service-java/actions/runs/41830346847) |
+| [secure-api-gateway — PR #3](https://github.com/juniordev830/secure-api-gateway/pull/3) | Cabeçalhos de origem e de autenticação mais rigorosos, testes de requisições rejeitadas | CI em verificação para o último commit; **não considerar pronto sem o resultado verde correspondente** |
+
+**Pendências críticas que permanecem:** identidade por usuário e autorização por recurso nos dois projetos financeiros, TLS, rotação de segredos, persistência de produção e implantação revisada. A proteção por tokens de operador **não** fornece isolamento entre usuários. A documentação de 60 repositórios não prova que os outros projetos foram auditados linha a linha.
+
+**Política confirmada:** todos os PRs desta atualização continuam separados, sem merge na `main`.
+
 ## Próxima rodada de trabalho
 
 1. **P0:** aprofundar a [issue de autenticação do controle de gastos](https://github.com/juniordev830/controle-gastos-residenciais/issues/2) e a [issue de pagamentos](https://github.com/juniordev830/payment-service-java/issues/3), conferindo o código atual contra os riscos documentados.
