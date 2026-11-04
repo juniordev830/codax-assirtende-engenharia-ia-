@@ -144,6 +144,19 @@ Esta seção registra **código e testes reais em PRs ainda não integrados**, n
 
 **Política confirmada:** todos os PRs desta atualização continuam separados, sem merge na `main`.
 
+## Prioridades validadas — 04/11/2026
+
+A validação de código confirma que os dois serviços financeiros usam tokens compartilhados, mas não associam dados a contas autenticadas. Autenticação sem autorização por proprietário não resolve o isolamento.
+
+1. **P0 — Identidade e isolamento por conta:** introduzir usuário/residência no Controle de Gastos e proprietário de pagamento no Java. Exigir filtros por conta em listagens, detalhes, resumos e escritas. Testar dois usuários com dados distintos, 401/403 e negação de acesso cruzado.
+2. **P0 — Integridade e publicação segura:** idempotência de criação no Payment Service, migrations, backup/restore, TLS e configuração externa revisada.
+3. **P1 — Gestão de segredos:** rotação, revogação, armazenamento seguro e logs sem credenciais.
+4. **P1 — Testes de segurança:** matriz de endpoints/papéis, integração com banco e testes negativos de acesso entre contas.
+
+Documentação técnica nas branches em revisão: [Controle de Gastos](https://github.com/juniordev830/controle-gastos-residenciais/blob/security/require-local-auth-config-20261104/docs/SECURITY_PRIORITIES_2026-11-04.md) e [Payment Service Java](https://github.com/juniordev830/payment-service-java/blob/security/reject-ambiguous-authorization-20261104/docs/SECURITY_PRIORITIES_2026-11-04.md).
+
+**Status:** prioridades verificadas e documentadas; nenhuma implementação de conta multiusuária foi concluída nem integrada à `main`.
+
 ## Próxima rodada de trabalho
 
 1. **P0:** aprofundar a [issue de autenticação do controle de gastos](https://github.com/juniordev830/controle-gastos-residenciais/issues/2) e a [issue de pagamentos](https://github.com/juniordev830/payment-service-java/issues/3), conferindo o código atual contra os riscos documentados.
