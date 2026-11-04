@@ -1,0 +1,50 @@
+name: Interface no Chrome
+on: pull_request
+permissions:
+  contents: read
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Compilar a interface
+        run: |
+          cd frontend
+          npm install --no-audit --no-fund
+          npm run build
+      - run: python -m pip install selenium==4.38.0
+      - name: Verificar desktop e celular
+        run: |
+          python -m http.server 8181 --directory frontend/dist >/tmp/web-server.log 2>&1 &
+          curl --retry 12 --retry-all-errors --retry-delay 1 -fsS http://localhost:8181/ -o /dev/null
+          mkdir -p capturas
+          python - <<'PYTEST'
+          from selenium import webdriver
+          from selenium.webdriver.common.by import By
+          from selenium.webdriver.support.ui import WebDriverWait
+          options = webdriver.ChromeOptions()
+          options.add_argument('--headless=new')
+          with webdriver.Chrome(options=options) as browser:
+              for width in (1440, 390):
+                  browser.execute_cdp_cmd('Emulation.setDeviceMetricsOverride', {
+                      'width': width, 'height': 900, 'deviceScaleFactor': 1, 'mobile': width < 500,
+                  })
+                  browser.get('http://localhost:8181/')
+                  wait = WebDriverWait(browser, 20)
+                  find = lambda element_id: browser.find_element(By.ID, element_id)
+                  wait.until(lambda b: b.find_element(By.CSS_SELECTOR, ".sidebar").is_displayed())
+                  browser.save_screenshot(f'capturas/interface-{width}.png')
+                  assert browser.execute_script('return document.documentElement.scrollWidth <= window.innerWidth')
+                  button = browser.find_element(By.XPATH, "//button[contains(.,'Revisão de código')]")
+                  button.click()
+                  assert button.get_attribute('aria-pressed') == 'true'
+          PYTEST
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: interface-chrome
+          path: capturas/
