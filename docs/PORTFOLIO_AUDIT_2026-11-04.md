@@ -166,6 +166,12 @@ As primeiras implementações independentes dos modelos de acesso já estão em 
 
 **Limite crítico:** essas são regras isoladas, ainda **não chamadas pelos endpoints**. Não há login multiusuário nem autorização persistida. As próximas etapas devem implementar identidade validada no servidor, propriedades de conta/residência no banco, migrations e testes de integração por recurso antes de expor as APIs. Os PRs ficam abertos e não são mesclados à main.
 
+## Hardening da autenticação no recrutamento — 04/11/2026
+
+O [PR #21 da plataforma de recrutamento](https://github.com/juniordev830/plataforma-de-recrutamento/pull/21) corrige uma ambiguidade no processamento de cabeçalhos `Authorization` duplicados. O middleware verifica a contagem de campos HTTP brutos, recusa valores combinados e cabeçalhos excessivos; o teste de integração envia dois cabeçalhos HTTP reais e mantém o caso positivo com um token válido.
+
+**Revisão de escopo:** as candidaturas e vagas salvas já tinham consultas filtradas por `req.user.id`, com identidade verificada por token e reconsulta ao banco. O novo PR não modifica esses fluxos de negócio. O resultado do CI precisa ser conferido no commit exato antes de considerar a alteração validada; não publicar dados pessoais reais sem revisão adicional.
+
 ## Próxima rodada de trabalho
 
 1. **P0:** aprofundar a [issue de autenticação do controle de gastos](https://github.com/juniordev830/controle-gastos-residenciais/issues/2) e a [issue de pagamentos](https://github.com/juniordev830/payment-service-java/issues/3), conferindo o código atual contra os riscos documentados.
