@@ -157,6 +157,15 @@ Documentação técnica nas branches em revisão: [Controle de Gastos](https://g
 
 **Status:** prioridades verificadas e documentadas; nenhuma implementação de conta multiusuária foi concluída nem integrada à `main`.
 
+## Fundação de políticas por proprietário — 04/11/2026
+
+As primeiras implementações independentes dos modelos de acesso já estão em revisão:
+
+- [Controle de Gastos — PR #16](https://github.com/juniordev830/controle-gastos-residenciais/pull/16): política de vínculos entre usuário e residência, papéis leitor/editor/administrador e testes xUnit para impedir acesso cruzado e rejeitar papéis desconhecidos. A suíte roda no GitHub Actions.
+- [Payment Service Java — PR #17](https://github.com/juniordev830/payment-service-java/pull/17): política de operações por proprietário e escopo com testes JUnit para negar leitura/criação entre contas. [CI aprovado](https://github.com/juniordev830/payment-service-java/actions/runs/41832834351).
+
+**Limite crítico:** essas são regras isoladas, ainda **não chamadas pelos endpoints**. Não há login multiusuário nem autorização persistida. As próximas etapas devem implementar identidade validada no servidor, propriedades de conta/residência no banco, migrations e testes de integração por recurso antes de expor as APIs. Os PRs ficam abertos e não são mesclados à main.
+
 ## Próxima rodada de trabalho
 
 1. **P0:** aprofundar a [issue de autenticação do controle de gastos](https://github.com/juniordev830/controle-gastos-residenciais/issues/2) e a [issue de pagamentos](https://github.com/juniordev830/payment-service-java/issues/3), conferindo o código atual contra os riscos documentados.
