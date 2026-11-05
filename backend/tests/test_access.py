@@ -46,3 +46,40 @@ def test_bearer_requires_scheme_and_unicode_login_is_handled(monkeypatch):
             assert response.status_code == 401
     finally:
         main._buckets.clear()
+
+
+def test_ambiguous_authorization_headers_are_rejected(monkeypatch):
+    token = "codax-test-token-" * 3
+    monkeypatch.setenv("CODAX_ACCESS_TOKEN", token)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    main._buckets.clear()
+    try:
+        with TestClient(main.app, client=("192.0.2.10", 123)) as client:
+            duplicate = client.post(
+                "/api/chat", json={"message": "oi"},
+                headers=[
+                    ("Authorization", "Bearer " + token),
+                    ("Authorization", "Bearer invalid"),
+                ],
+            )
+            assert duplicate.status_code == 401
+
+            combined = client.post(
+                "/api/chat", json={"message": "oi"},
+                headers={"Authorization": "Bearer " + token + ", Bearer invalid"},
+            )
+            assert combined.status_code == 401
+
+            oversized = client.post(
+                "/api/chat", json={"message": "oi"},
+                headers={"Authorization": "Bearer " + ("a" * 8200)},
+            )
+            assert oversized.status_code == 401
+
+            allowed = client.post(
+                "/api/chat", json={"message": "oi"},
+                headers={"Authorization": "Bearer " + token},
+            )
+            assert allowed.status_code == 200
+    finally:
+        main._buckets.clear()
