@@ -72,7 +72,13 @@ async def access_control(request: Request, call_next):
             if token:
                 if len(token) < 32:
                     return JSONResponse({"detail": "Configure um token de acesso com pelo menos 32 caracteres."}, status_code=503)
-                authorization = request.headers.get("authorization", "")
+                # HTTP intermediaries can disagree about duplicated or combined
+                # Authorization fields. Reject ambiguity before checking the cookie.
+                auth_values = request.headers.getlist("authorization")
+                if (len(auth_values) > 1 or
+                        any(len(value) > 8192 or "," in value for value in auth_values)):
+                    return JSONResponse({"detail": "Cabeçalho Authorization ambíguo."}, status_code=401)
+                authorization = auth_values[0] if auth_values else ""
                 supplied = authorization[7:] if authorization.startswith("Bearer ") else ""
                 cookie = request.cookies.get("codax_session", "")
                 valid_cookie = False
