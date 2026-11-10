@@ -2,6 +2,11 @@ import logging
 import os
 from typing import Any
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+)
+
 logger = logging.getLogger("codax.security")
 
 
@@ -12,7 +17,8 @@ def parse_allowed_origins() -> list[str]:
 
 
 def is_local_host(host: str | None) -> bool:
-    return bool(host) and host.lower().replace("[::1]", "::1") in {"127.0.0.1", "::1", "testclient", "localhost"}
+    host_value = (host or "").lower().replace("[::1]", "::1")
+    return host_value in {"127.0.0.1", "::1", "testclient", "localhost"}
 
 
 def is_valid_access_token(token: str | None) -> bool:
@@ -21,5 +27,4 @@ def is_valid_access_token(token: str | None) -> bool:
 
 
 def log_access_event(event: str, **context: Any) -> None:
-    payload = {"event": event, **context}
-    logger.info("access_event", extra=payload)
+    logger.info("access_event", extra={"event": event, **context})

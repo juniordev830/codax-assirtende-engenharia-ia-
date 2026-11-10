@@ -1,90 +1,33 @@
-from fastapi.testclient import TestClient
+// Codax calls only its own backend; GitHub credentials never reach the browser.
+import { validRepositoryName, readApiResult } from "./githubRequestUtils.mjs";
 
-from app import main
+export async function getGithubRepositories(api, request = fetch, page = 1, per_page = 100) {
+  const query = page === 1 && per_page === 100
+    ? ""
+    : `?${new URLSearchParams({ page: String(page), per_page: String(per_page) }).toString()}`;
+  const response = await request(`${api}/api/github/repos${query}`, { credentials: "include" });
+  const data = await readApiResult(response, "Não foi possível consultar os projetos.");
+  if (!Array.isArray(data.repositories)) throw new Error("Lista de repositórios inválida.");
+  return {
+    owner: typeof data.owner === "string" ? data.owner : "",
+    repositories: data.repositories.filter(item =>
+      item && typeof item.name === "string" &&
+      validRepositoryName(item.name)
+    ).slice(0, 100),
+  };
+}
 
-
-client = TestClient(main.app)
-
-
-def test_health_reports_service_and_ai_configuration(monkeypatch):
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-
-    response = client.get("/api/health")
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["status"] == "ok"
-    assert payload["service"] == "jarvis-dev-local"
-    assert payload["ai_configured"] is False
-    assert payload["model"]
-
-
-def test_chat_uses_local_mode_without_api_key(monkeypatch):
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-
-    response = client.post("/api/chat", json={"message": "Ajude-me com Python"})
-
-    assert response.status_code == 200
-    assert response.json()["mode"] == "local"
-    assert "pytest" in response.json()["reply"]
-    assert "OPENAI_API_KEY" not in response.json()["reply"]
-
-
-def test_local_mode_explains_its_limits(monkeypatch):
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-
-    response = client.post("/api/chat", json={"message": "Oi"})
-
-    assert response.status_code == 200
-    assert response.json()["mode"] == "local"
-    assert "sem chave de API" in response.json()["reply"]
-
-
-def test_chat_rejects_blank_message(monkeypatch):
-    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
-
-    response = client.post("/api/chat", json={"message": "   "})
-
-    assert response.status_code == 422
-    assert "vazia" in response.json()["detail"]
-
-
-def test_chat_returns_mocked_ai_reply(monkeypatch):
-    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
-
-    class FakeResponse:
-        output_text = "Resposta simulada para o teste."
-
-    class FakeResponses:
-        async def create(self, **kwargs):
-            assert kwargs["input"] == [
-                {"role": "user", "content": "Oi"},
-                {"role": "assistant", "content": "Olá!"},
-                {"role": "user", "content": "Explique APIs REST"},
-            ]
-            assert kwargs["max_output_tokens"] == 900
-            return FakeResponse()
-
-    class FakeClient:
-        def __init__(self, **kwargs):
-            self.responses = FakeResponses()
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, exc_type, exc, tb):
-            return False
-
-    monkeypatch.setattr(main, "AsyncOpenAI", FakeClient)
-
-    response = client.post("/api/chat", json={
-        "message": "  Explique APIs REST  ",
-        "history": [
-            {"role": "user", "content": "Oi"},
-            {"role": "assistant", "content": "Olá!"},
-        ],
-    })
-
-    assert response.status_code == 200
-    assert response.json()["reply"] == "Resposta simulada para o teste."
-    assert response.json()["mode"] == "openai"
+export async function getGithubRepository(api, name, request = fetch) {
+  if (!validRepositoryName(name)) {
+    throw new Error("Nome de repositório inválido.");
+  }
+  const response = await request(
+    `${api}/api/github/repos/${encodeURIComponent(name)}`,
+    { credentials: "include" },
+  );
+  const data = await readApiResult(response, "Não foi possível consultar os projetos.");
+  if (typeof data.name !== "string" || typeof data.readme_preview !== "string") {
+    throw new Error("Resposta de repositório inválida.");
+  }
+  return data;
+}

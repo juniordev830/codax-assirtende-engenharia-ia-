@@ -1,117 +1,365 @@
-from fastapi.testclient import TestClient
+import os
+import re
+import hmac
+import time
+import logging
+import uuid
+from collections import OrderedDict
+from threading import Lock
+from datetime import datetime, timezone
 
-from app import main
+from dotenv import load_dotenv
+from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
+from openai import APIConnectionError, APIStatusError, AuthenticationError, AsyncOpenAI, RateLimitError
+from pydantic import BaseModel, Field, ConfigDict, model_validator
+from typing import Literal
 
+from app.github_readonly import list_public_repositories, read_public_repository
+from app.code_inspection import list_reviewable_files, inspect_public_source
+from app.ai_code_review import review_with_ai
+from app.multi_file_review import review_multiple_locally, propose_multifile_diff
+from app.security import (
+    is_local_host,
+    is_valid_access_token,
+    log_access_event,
+    parse_allowed_origins,
+)
 
-client = TestClient(main.app)
+load_dotenv()
 
+logger = logging.getLogger("codax.api")
 
-def test_health_reports_service_and_ai_configuration(monkeypatch):
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+MODEL = os.getenv("OPENAI_MODEL", "gpt-5.4-mini")
+SYSTEM_INSTRUCTIONS = """
+Você é J.A.R.V.I.S. Dev, um assistente de programação em português do Brasil.
+Ajude o usuário a aprender, entender erros, planejar e implementar software.
+Seja direto, didático e honesto. Explique riscos antes de sugerir comandos destrutivos.
+O painel tem recursos separados para ler arquivos públicos do GitHub, mediante seleção explícita.
+No chat você não consulta automaticamente esses arquivos, nem tem acesso a terminal ou computador.
+Nunca diga que executou comandos, analisou arquivos não enviados ou alterou repositórios.
+Forneça código e passos seguros quando solicitado.
+Não solicite que o usuário envie chaves de API, senhas ou tokens pelo chat.
+"""
 
-    response = client.get("/api/health")
+app = FastAPI(title="JARVIS Dev Local API", version="0.3.0")
 
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["status"] == "ok"
-    assert payload["service"] == "jarvis-dev-local"
-    assert payload["ai_configured"] is False
-    assert payload["model"]
-
-
-def test_chat_uses_local_mode_without_api_key(monkeypatch):
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-
-    response = client.post("/api/chat", json={"message": "Ajude-me com Python"})
-
-    assert response.status_code == 200
-    assert response.json()["mode"] == "local"
-    assert "pytest" in response.json()["reply"]
-    assert "OPENAI_API_KEY" not in response.json()["reply"]
-
-
-def test_local_mode_explains_its_limits(monkeypatch):
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-
-    response = client.post("/api/chat", json={"message": "Oi"})
-
-    assert response.status_code == 200
-    assert response.json()["mode"] == "local"
-    assert "sem chave de API" in response.json()["reply"]
-
-
-def test_chat_rejects_blank_message(monkeypatch):
-    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
-
-    response = client.post("/api/chat", json={"message": "   "})
-
-    assert response.status_code == 422
-    assert "vazia" in response.json()["detail"]
-
-
-def test_chat_returns_mocked_ai_reply(monkeypatch):
-    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
-
-    class FakeResponse:
-        output_text = "Resposta simulada para o teste."
-
-    class FakeResponses:
-        async def create(self, **kwargs):
-            assert kwargs["input"] == [
-                {"role": "user", "content": "Oi"},
-                {"role": "assistant", "content": "Olá!"},
-                {"role": "user", "content": "Explique APIs REST"},
-            ]
-            assert kwargs["max_output_tokens"] == 900
-            return FakeResponse()
-
-    class FakeClient:
-        def __init__(self, **kwargs):
-            self.responses = FakeResponses()
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, exc_type, exc, tb):
-            return False
-
-    monkeypatch.setattr(main, "AsyncOpenAI", FakeClient)
-
-    response = client.post("/api/chat", json={
-        "message": "  Explique APIs REST  ",
-        "history": [
-            {"role": "user", "content": "Oi"},
-            {"role": "assistant", "content": "Olá!"},
-        ],
-    })
-
-    assert response.status_code == 200
-    assert response.json()["reply"] == "Resposta simulada para o teste."
-    assert response.json()["mode"] == "openai"
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=parse_allowed_origins(),
+    allow_credentials=True,
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type"],
+)
 
 
-def test_session_requires_strong_token(monkeypatch):
-    monkeypatch.setenv("CODAX_ACCESS_TOKEN", "short")
+# Bounded per-process limiter. Configure a shared edge limiter for multiple workers.
+_buckets = OrderedDict()
+_bucket_lock = Lock()
 
-    response = client.post(
-        "/api/session",
-        json={"token": "short"},
-        headers={"origin": "http://127.0.0.1:5173"},
+def _limited(host: str) -> bool:
+    now = time.monotonic()
+    with _bucket_lock:
+        started, count = _buckets.pop(host, (now, 0))
+        if now - started >= 60:
+            started, count = now, 0
+        _buckets[host] = (started, count + 1)
+        while len(_buckets) > 10000:
+            _buckets.popitem(last=False)
+        return count >= 20
+
+
+@app.middleware("http")
+async def access_control(request: Request, call_next):
+    request_id = request.headers.get("x-request-id") or uuid.uuid4().hex
+    request.state.request_id = request_id
+    logger.info(
+        "request_start",
+        extra={
+            "request_id": request_id,
+            "method": request.method,
+            "path": request.url.path,
+            "host": request.client.host if request.client else "",
+        },
     )
 
-    assert response.status_code == 503
-    assert "32 caracteres" in response.json()["detail"]
+    if request.url.path.startswith("/api/") and request.method != "OPTIONS":
+        host = request.client.host if request.client else ""
+        if (request.method == "POST" or request.url.path.startswith("/api/github/")) and _limited(host):
+            log_access_event(
+                "rate_limited",
+                request_id=request_id,
+                host=host,
+                path=request.url.path,
+                method=request.method,
+            )
+            return JSONResponse({"detail": "Muitas requisições. Aguarde um minuto."}, status_code=429, headers={"Retry-After": "60"})
+        if request.url.path not in {"/api/health", "/api/session"}:
+            token = os.getenv("CODAX_ACCESS_TOKEN", "")
+            local = is_local_host(host)
+            if not token and not local:
+                log_access_event("missing_token", request_id=request_id, host=host, path=request.url.path, method=request.method)
+                return JSONResponse({"detail": "Configure CODAX_ACCESS_TOKEN antes do acesso remoto."}, status_code=503)
+            if token:
+                if not is_valid_access_token(token):
+                    log_access_event("token_config_invalid", request_id=request_id, host=host, path=request.url.path, method=request.method)
+                    return JSONResponse({"detail": "Configure um token de acesso com pelo menos 32 caracteres."}, status_code=503)
+                authorization = request.headers.get("authorization", "")
+                supplied = authorization[7:] if authorization.startswith("Bearer ") else ""
+                cookie = request.cookies.get("codax_session", "")
+                valid_cookie = False
+                try:
+                    expiry, signature = cookie.split(".", 1)
+                    expected = hmac.new(token.encode(), ("codax:" + expiry).encode(), "sha256").hexdigest()
+                    valid_cookie = int(expiry) > time.time() and hmac.compare_digest(signature, expected)
+                except (ValueError, TypeError):
+                    pass
+                if not (hmac.compare_digest(supplied.encode("utf-8"), token.encode("utf-8")) or valid_cookie):
+                    log_access_event("unauthorized", request_id=request_id, host=host, path=request.url.path, method=request.method)
+                    return JSONResponse({"detail": "Autenticação necessária."}, status_code=401)
+                if valid_cookie and request.method == "POST":
+                    allowed = parse_allowed_origins()
+                    origin = request.headers.get("origin")
+                    if origin not in allowed:
+                        log_access_event(
+                            "origin_rejected",
+                            request_id=request_id,
+                            host=host,
+                            path=request.url.path,
+                            method=request.method,
+                            origin=origin,
+                        )
+                        return JSONResponse({"detail": "Origem não autorizada."}, status_code=403)
+    response = await call_next(request)
+    logger.info(
+        "request_end",
+        extra={
+            "request_id": request_id,
+            "method": request.method,
+            "path": request.url.path,
+            "status_code": response.status_code,
+        },
+    )
+    return response
 
 
-def test_session_rejects_invalid_origin(monkeypatch):
-    monkeypatch.setenv("CODAX_ACCESS_TOKEN", "1234567890abcdef1234567890abcdef")
+@app.get("/api/github/repos")
+async def github_repositories(page: int = 1, per_page: int = 100):
+    return await list_public_repositories(page=page, per_page=per_page)
 
-    response = client.post(
-        "/api/session",
-        json={"token": "1234567890abcdef1234567890abcdef"},
-        headers={"origin": "https://evil.example"},
+
+@app.get("/api/github/repos/{repo_name}/files")
+async def github_repository_files(repo_name: str):
+    return await list_reviewable_files(repo_name)
+
+
+@app.get("/api/github/repos/{repo_name}/source")
+async def github_repository_source(repo_name: str, path: str):
+    return await inspect_public_source(repo_name, path)
+
+
+class AIReviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    path: str = Field(min_length=1, max_length=220)
+    expected_sha: str = Field(min_length=40, max_length=40)
+    confirmed_external_processing: Literal[True]
+
+
+@app.post("/api/github/repos/{repo_name}/ai-review")
+async def github_ai_review(repo_name: str, payload: AIReviewRequest):
+    return await review_with_ai(repo_name, payload.path, payload.expected_sha)
+
+
+class SourceSelection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    path: str = Field(min_length=1, max_length=220)
+    expected_sha: str = Field(min_length=40, max_length=40)
+
+
+class LocalMultiFileRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    files: list[SourceSelection] = Field(min_length=1, max_length=3)
+
+
+class DiffProposalRequest(LocalMultiFileRequest):
+    confirmed_external_processing: Literal[True]
+    preview_only: Literal[True]
+
+
+@app.post("/api/github/repos/{repo_name}/review-batch")
+async def github_review_batch(repo_name: str, payload: LocalMultiFileRequest):
+    return await review_multiple_locally(repo_name, [item.model_dump() for item in payload.files])
+
+
+@app.post("/api/github/repos/{repo_name}/diff-proposal")
+async def github_diff_proposal(repo_name: str, payload: DiffProposalRequest):
+    return await propose_multifile_diff(repo_name, [item.model_dump() for item in payload.files])
+
+
+@app.get("/api/github/repos/{repo_name}")
+async def github_repository(repo_name: str):
+    return await read_public_repository(repo_name)
+
+
+class SessionRequest(BaseModel):
+    token: str = Field(min_length=1, max_length=512)
+
+
+@app.post("/api/session")
+def session(payload: SessionRequest, request: Request, response: Response):
+    token = os.getenv("CODAX_ACCESS_TOKEN", "")
+    allowed = parse_allowed_origins()
+    origin = request.headers.get("origin")
+    if origin not in allowed:
+        log_access_event("origin_rejected", request_id=getattr(request.state, "request_id", ""), host=request.client.host if request.client else "", path="/api/session", method=request.method, origin=origin)
+        raise HTTPException(status_code=403, detail="Origem não autorizada.")
+    if not is_valid_access_token(token):
+        log_access_event("token_config_invalid", request_id=getattr(request.state, "request_id", ""), host=request.client.host if request.client else "", path="/api/session", method=request.method)
+        raise HTTPException(status_code=503, detail="Configure um token de acesso com pelo menos 32 caracteres.")
+    if not hmac.compare_digest(payload.token.encode("utf-8"), token.encode("utf-8")):
+        log_access_event("unauthorized", request_id=getattr(request.state, "request_id", ""), host=request.client.host if request.client else "", path="/api/session", method=request.method)
+        raise HTTPException(status_code=401, detail="Token inválido.")
+    expiry = str(int(time.time()) + 3600)
+    signature = hmac.new(token.encode(), ("codax:" + expiry).encode(), "sha256").hexdigest()
+    response.set_cookie(
+        "codax_session",
+        expiry + "." + signature,
+        httponly=True,
+        samesite="strict",
+        secure=request.url.scheme == "https",
+        max_age=3600,
+    )
+    return {"authenticated": True}
+
+
+class ChatTurn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1, max_length=4000)
+
+
+class ChatRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=4000)
+    history: list[ChatTurn] = Field(default_factory=list, max_length=12)
+
+    @model_validator(mode="after")
+    def validate_history_budget(self):
+        if sum(len(turn.content) for turn in self.history) > 12000:
+            raise ValueError("O histórico ultrapassa o limite de 12000 caracteres.")
+        return self
+
+
+@app.get("/api/health")
+def health():
+    return {
+        "status": "ok",
+        "service": "jarvis-dev-local",
+        "ai_configured": bool(os.getenv("OPENAI_API_KEY")),
+        "model": MODEL,
+        "time_utc": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@app.get("/api/capabilities")
+def capabilities():
+    return {
+        "service": "jarvis-dev-local",
+        "api_version": "0.3.0",
+        "ai": {
+            "configured": bool(os.getenv("OPENAI_API_KEY")),
+            "model": MODEL if os.getenv("OPENAI_API_KEY") else "rules",
+        },
+        "github": {
+            "read_only": True,
+            "repository_listing": True,
+            "source_inspection": True,
+            "single_file_ai_review": True,
+            "multi_file_review": True,
+            "diff_proposal_preview_only": True,
+        },
+        "limits": {
+            "chat_history_turns": 12,
+            "chat_history_characters": 12000,
+            "review_batch_files": 3,
+            "rate_limit_per_host_per_minute": 20,
+        },
+        "authentication": {
+            "bearer_or_session_cookie": True,
+            "session_ttl_seconds": 3600,
+        },
+    }
+
+
+def local_reply(message: str) -> str:
+    normalized = message.casefold()
+    if re.search(r"\b(?:olá|ola|oi|bom dia|boa tarde|boa noite)\b", normalized):
+        return "Olá! Estou no modo local, sem chave de API e sem cobrança de IA. Minhas respostas são limitadas e baseadas em regras simples."
+    if any(word in normalized for word in ("ajuda", "comandos", "o que você faz", "o que voce faz")):
+        return (
+            "Modo local ativo. Posso orientar sobre comandos comuns de desenvolvimento: "
+            "git status para ver alterações, pytest para testes Python, npm test para testes JavaScript "
+            "e npm run build para compilar um frontend. Ainda não executo esses comandos nem acesso seus arquivos."
+        )
+    if "git status" in normalized or "git" in normalized:
+        return "Para conferir o estado do repositório, abra o terminal na pasta do projeto e execute `git status`. Eu não executo o comando neste modo."
+    if "pytest" in normalized or "teste python" in normalized:
+        return "Para rodar os testes Python, entre na pasta do projeto e execute `python -m pytest -q`. Leia a saída para localizar testes que falharam."
+    if "npm" in normalized or "javascript" in normalized or "typescript" in normalized:
+        return "Em projetos Node.js, `npm install` instala dependências, `npm test` executa testes se houver script configurado e `npm run build` compila se o projeto definir esse script."
+    if "python" in normalized:
+        return "Para verificar a versão do Python, execute `python --version`. Para testar um projeto com pytest, use `python -m pytest -q`. Não compartilhe senhas nem tokens."
+    return (
+        "Estou funcionando no modo local, sem chamar uma IA externa. Minhas respostas offline são limitadas. "
+        "Posso ajudar com orientações básicas de Git, Python e Node.js; para análise generativa mais ampla, "
+        "a integração opcional com a API de IA pode ser configurada no backend."
     )
 
-    assert response.status_code == 403
-    assert "Origem não autorizada" in response.json()["detail"]
 
+@app.post("/api/chat")
+async def chat(payload: ChatRequest):
+    message = payload.message.strip()
+    if not message:
+        raise HTTPException(status_code=422, detail="A mensagem não pode estar vazia.")
+
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        return {"reply": local_reply(message), "mode": "local", "model": "rules"}
+
+    try:
+        async with AsyncOpenAI(api_key=api_key, timeout=45.0, max_retries=1) as client:
+            response = await client.responses.create(
+                model=MODEL,
+                instructions=SYSTEM_INSTRUCTIONS,
+                input=[
+                    *[{"role": turn.role, "content": turn.content} for turn in payload.history],
+                    {"role": "user", "content": message},
+                ],
+                max_output_tokens=900,
+            )
+        answer = (response.output_text or "").strip()
+        if not answer:
+            raise HTTPException(status_code=502, detail="A IA não retornou texto. Tente novamente.")
+        return {"reply": answer, "mode": "openai", "model": MODEL}
+    except HTTPException:
+        raise
+    except AuthenticationError:
+        raise HTTPException(
+            status_code=503,
+            detail="A chave da API foi recusada. Confira OPENAI_API_KEY no arquivo backend/.env.",
+        ) from None
+    except RateLimitError:
+        raise HTTPException(
+            status_code=429,
+            detail="A API atingiu um limite de uso ou não há saldo disponível. Confira seu painel de API.",
+        ) from None
+    except APIConnectionError:
+        raise HTTPException(
+            status_code=502,
+            detail="Não consegui conectar à API de IA. Verifique sua internet e tente novamente.",
+        ) from None
+    except APIStatusError:
+        raise HTTPException(
+            status_code=502,
+            detail="O provedor de IA retornou um erro. Tente novamente em instantes.",
+        ) from None
