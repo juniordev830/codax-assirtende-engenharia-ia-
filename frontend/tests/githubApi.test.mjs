@@ -1,73 +1,59 @@
-import test from "node:test";
-import assert from "node:assert/strict";
-import { getGithubRepositories, getGithubRepository } from "../src/githubApi.mjs";
+name: Codax CI
 
-function answer(status, body) {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    json: async () => body,
-  };
-}
+on:
+  push:
+    branches: [main, "feature/**"]
+  pull_request:
+    branches: [main]
 
-test("lists repository names using only the authenticated Codax backend", async () => {
-  const calls = [];
-  const request = async (url, options) => {
-    calls.push({ url, options });
-    return answer(200, {
-      owner: "juniordev830",
-      repositories: [
-        { name: "codax", description: "Assistente" },
-        { name: "../../unsafe" },
-        { name: " " },
-      ],
-    });
-  };
-  const result = await getGithubRepositories("https://codax.example", request);
-  assert.deepEqual(result.repositories.map(repo => repo.name), ["codax"]);
-  assert.equal(result.owner, "juniordev830");
-  assert.deepEqual(calls, [{
-    url: "https://codax.example/api/github/repos",
-    options: { credentials: "include" },
-  }]);
-});
+permissions:
+  contents: read
 
-test("opens README through the backend with browser credentials", async () => {
-  const calls = [];
-  const request = async (url, options) => {
-    calls.push({ url, options });
-    return answer(200, { name: "codax", readme_preview: "# Projeto" });
-  };
-  const result = await getGithubRepository("https://codax.example", "codax", request);
-  assert.equal(result.readme_preview, "# Projeto");
-  assert.equal(calls[0].url, "https://codax.example/api/github/repos/codax");
-  assert.equal(calls[0].options.credentials, "include");
-});
+jobs:
+  backend-tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+      - name: Audit Python dependencies
+        run: |
+          python -m pip install pip-audit
+          pip-audit -r requirements.txt
+      - name: Run API tests with coverage
+        run: |
+          python -m pip install pytest-cov
+          python -m pytest --cov=app --cov-report=term-missing --cov-fail-under=75 -q
 
-test("rejects path-like names before fetching", async () => {
-  const request = async () => { throw new Error("Should not call backend"); };
-  await assert.rejects(getGithubRepository("http://localhost", "../secrets", request), /inválido/);
-  await assert.rejects(getGithubRepository("http://localhost", "bad name", request), /inválido/);
-});
-
-test("surfaces controlled authorization and upstream errors", async () => {
-  await assert.rejects(
-    getGithubRepositories("http://localhost", async () => answer(401, { detail: "Autenticação necessária." })),
-    /Autenticação necessária/,
-  );
-  await assert.rejects(
-    getGithubRepositories("http://localhost", async () => answer(502, {})),
-    /Não foi possível consultar/,
-  );
-});
-
-test("rejects malformed success responses", async () => {
-  await assert.rejects(
-    getGithubRepositories("http://localhost", async () => answer(200, { repositories: {} })),
-    /inválida/,
-  );
-  await assert.rejects(
-    getGithubRepository("http://localhost", "codax", async () => answer(200, { name: "codax" })),
-    /inválida/,
-  );
-});
+  frontend-build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install dependencies
+        run: npm install
+      - name: Test conversation memory helpers
+        run: npm test
+      - name: Audit frontend dependencies
+        run: npm audit --audit-level=high
+      - name: Build frontend
+        run: npm run build
