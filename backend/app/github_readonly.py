@@ -1,365 +1,156 @@
+"""Public, read-only GitHub integration. No GitHub credentials or write scopes."""
+import base64
+import json
 import os
 import re
-import hmac
-import time
-import logging
-import uuid
-from collections import OrderedDict
-from threading import Lock
-from datetime import datetime, timezone
 
-from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Request, Response
-from fastapi.responses import JSONResponse
-from fastapi.middleware.cors import CORSMiddleware
-from openai import APIConnectionError, APIStatusError, AuthenticationError, AsyncOpenAI, RateLimitError
-from pydantic import BaseModel, Field, ConfigDict, model_validator
-from typing import Literal
+import httpx
+from fastapi import HTTPException
 
-from app.github_readonly import list_public_repositories, read_public_repository
-from app.code_inspection import list_reviewable_files, inspect_public_source
-from app.ai_code_review import review_with_ai
-from app.multi_file_review import review_multiple_locally, propose_multifile_diff
-from app.security import (
-    is_local_host,
-    is_valid_access_token,
-    log_access_event,
-    parse_allowed_origins,
-)
-
-load_dotenv()
-
-logger = logging.getLogger("codax.api")
-
-MODEL = os.getenv("OPENAI_MODEL", "gpt-5.4-mini")
-SYSTEM_INSTRUCTIONS = """
-Você é J.A.R.V.I.S. Dev, um assistente de programação em português do Brasil.
-Ajude o usuário a aprender, entender erros, planejar e implementar software.
-Seja direto, didático e honesto. Explique riscos antes de sugerir comandos destrutivos.
-O painel tem recursos separados para ler arquivos públicos do GitHub, mediante seleção explícita.
-No chat você não consulta automaticamente esses arquivos, nem tem acesso a terminal ou computador.
-Nunca diga que executou comandos, analisou arquivos não enviados ou alterou repositórios.
-Forneça código e passos seguros quando solicitado.
-Não solicite que o usuário envie chaves de API, senhas ou tokens pelo chat.
-"""
-
-app = FastAPI(title="JARVIS Dev Local API", version="0.3.0")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=parse_allowed_origins(),
-    allow_credentials=True,
-    allow_methods=["GET", "POST"],
-    allow_headers=["Content-Type"],
-)
+API_ROOT = "https://api.github.com"
+HEADERS = {
+    "Accept": "application/vnd.github+json",
+    "X-GitHub-Api-Version": "2022-11-28",
+    "User-Agent": "Codax-ReadOnly-Assistant",
+}
+NAME_PATTERN = re.compile(r"[A-Za-z0-9_.-]{1,100}\Z")
+OWNER_PATTERN = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?\Z")
+README_PREVIEW_BYTES = 8000
+PROFILE_MAX_BYTES = 4096
+PROFILE_PATH = ".codax/project.json"
 
 
-# Bounded per-process limiter. Configure a shared edge limiter for multiple workers.
-_buckets = OrderedDict()
-_bucket_lock = Lock()
-
-def _limited(host: str) -> bool:
-    now = time.monotonic()
-    with _bucket_lock:
-        started, count = _buckets.pop(host, (now, 0))
-        if now - started >= 60:
-            started, count = now, 0
-        _buckets[host] = (started, count + 1)
-        while len(_buckets) > 10000:
-            _buckets.popitem(last=False)
-        return count >= 20
+def configured_owner() -> str:
+    owner = os.getenv("CODAX_GITHUB_OWNER", "juniordev830").strip()
+    if not OWNER_PATTERN.fullmatch(owner):
+        raise HTTPException(status_code=503, detail="Configure CODAX_GITHUB_OWNER com um usuário GitHub válido.")
+    return owner
 
 
-@app.middleware("http")
-async def access_control(request: Request, call_next):
-    request_id = request.headers.get("x-request-id") or uuid.uuid4().hex
-    request.state.request_id = request_id
-    logger.info(
-        "request_start",
-        extra={
-            "request_id": request_id,
-            "method": request.method,
-            "path": request.url.path,
-            "host": request.client.host if request.client else "",
-        },
-    )
-
-    if request.url.path.startswith("/api/") and request.method != "OPTIONS":
-        host = request.client.host if request.client else ""
-        if (request.method == "POST" or request.url.path.startswith("/api/github/")) and _limited(host):
-            log_access_event(
-                "rate_limited",
-                request_id=request_id,
-                host=host,
-                path=request.url.path,
-                method=request.method,
-            )
-            return JSONResponse({"detail": "Muitas requisições. Aguarde um minuto."}, status_code=429, headers={"Retry-After": "60"})
-        if request.url.path not in {"/api/health", "/api/session"}:
-            token = os.getenv("CODAX_ACCESS_TOKEN", "")
-            local = is_local_host(host)
-            if not token and not local:
-                log_access_event("missing_token", request_id=request_id, host=host, path=request.url.path, method=request.method)
-                return JSONResponse({"detail": "Configure CODAX_ACCESS_TOKEN antes do acesso remoto."}, status_code=503)
-            if token:
-                if not is_valid_access_token(token):
-                    log_access_event("token_config_invalid", request_id=request_id, host=host, path=request.url.path, method=request.method)
-                    return JSONResponse({"detail": "Configure um token de acesso com pelo menos 32 caracteres."}, status_code=503)
-                authorization = request.headers.get("authorization", "")
-                supplied = authorization[7:] if authorization.startswith("Bearer ") else ""
-                cookie = request.cookies.get("codax_session", "")
-                valid_cookie = False
-                try:
-                    expiry, signature = cookie.split(".", 1)
-                    expected = hmac.new(token.encode(), ("codax:" + expiry).encode(), "sha256").hexdigest()
-                    valid_cookie = int(expiry) > time.time() and hmac.compare_digest(signature, expected)
-                except (ValueError, TypeError):
-                    pass
-                if not (hmac.compare_digest(supplied.encode("utf-8"), token.encode("utf-8")) or valid_cookie):
-                    log_access_event("unauthorized", request_id=request_id, host=host, path=request.url.path, method=request.method)
-                    return JSONResponse({"detail": "Autenticação necessária."}, status_code=401)
-                if valid_cookie and request.method == "POST":
-                    allowed = parse_allowed_origins()
-                    origin = request.headers.get("origin")
-                    if origin not in allowed:
-                        log_access_event(
-                            "origin_rejected",
-                            request_id=request_id,
-                            host=host,
-                            path=request.url.path,
-                            method=request.method,
-                            origin=origin,
-                        )
-                        return JSONResponse({"detail": "Origem não autorizada."}, status_code=403)
-    response = await call_next(request)
-    logger.info(
-        "request_end",
-        extra={
-            "request_id": request_id,
-            "method": request.method,
-            "path": request.url.path,
-            "status_code": response.status_code,
-        },
-    )
-    return response
+def _client_factory():
+    return httpx.AsyncClient(timeout=10.0, follow_redirects=False)
 
 
-@app.get("/api/github/repos")
-async def github_repositories(page: int = 1, per_page: int = 100):
-    return await list_public_repositories(page=page, per_page=per_page)
-
-
-@app.get("/api/github/repos/{repo_name}/files")
-async def github_repository_files(repo_name: str):
-    return await list_reviewable_files(repo_name)
-
-
-@app.get("/api/github/repos/{repo_name}/source")
-async def github_repository_source(repo_name: str, path: str):
-    return await inspect_public_source(repo_name, path)
-
-
-class AIReviewRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    path: str = Field(min_length=1, max_length=220)
-    expected_sha: str = Field(min_length=40, max_length=40)
-    confirmed_external_processing: Literal[True]
-
-
-@app.post("/api/github/repos/{repo_name}/ai-review")
-async def github_ai_review(repo_name: str, payload: AIReviewRequest):
-    return await review_with_ai(repo_name, payload.path, payload.expected_sha)
-
-
-class SourceSelection(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    path: str = Field(min_length=1, max_length=220)
-    expected_sha: str = Field(min_length=40, max_length=40)
-
-
-class LocalMultiFileRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    files: list[SourceSelection] = Field(min_length=1, max_length=3)
-
-
-class DiffProposalRequest(LocalMultiFileRequest):
-    confirmed_external_processing: Literal[True]
-    preview_only: Literal[True]
-
-
-@app.post("/api/github/repos/{repo_name}/review-batch")
-async def github_review_batch(repo_name: str, payload: LocalMultiFileRequest):
-    return await review_multiple_locally(repo_name, [item.model_dump() for item in payload.files])
-
-
-@app.post("/api/github/repos/{repo_name}/diff-proposal")
-async def github_diff_proposal(repo_name: str, payload: DiffProposalRequest):
-    return await propose_multifile_diff(repo_name, [item.model_dump() for item in payload.files])
-
-
-@app.get("/api/github/repos/{repo_name}")
-async def github_repository(repo_name: str):
-    return await read_public_repository(repo_name)
-
-
-class SessionRequest(BaseModel):
-    token: str = Field(min_length=1, max_length=512)
-
-
-@app.post("/api/session")
-def session(payload: SessionRequest, request: Request, response: Response):
-    token = os.getenv("CODAX_ACCESS_TOKEN", "")
-    allowed = parse_allowed_origins()
-    origin = request.headers.get("origin")
-    if origin not in allowed:
-        log_access_event("origin_rejected", request_id=getattr(request.state, "request_id", ""), host=request.client.host if request.client else "", path="/api/session", method=request.method, origin=origin)
-        raise HTTPException(status_code=403, detail="Origem não autorizada.")
-    if not is_valid_access_token(token):
-        log_access_event("token_config_invalid", request_id=getattr(request.state, "request_id", ""), host=request.client.host if request.client else "", path="/api/session", method=request.method)
-        raise HTTPException(status_code=503, detail="Configure um token de acesso com pelo menos 32 caracteres.")
-    if not hmac.compare_digest(payload.token.encode("utf-8"), token.encode("utf-8")):
-        log_access_event("unauthorized", request_id=getattr(request.state, "request_id", ""), host=request.client.host if request.client else "", path="/api/session", method=request.method)
-        raise HTTPException(status_code=401, detail="Token inválido.")
-    expiry = str(int(time.time()) + 3600)
-    signature = hmac.new(token.encode(), ("codax:" + expiry).encode(), "sha256").hexdigest()
-    response.set_cookie(
-        "codax_session",
-        expiry + "." + signature,
-        httponly=True,
-        samesite="strict",
-        secure=request.url.scheme == "https",
-        max_age=3600,
-    )
-    return {"authenticated": True}
-
-
-class ChatTurn(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    role: Literal["user", "assistant"]
-    content: str = Field(min_length=1, max_length=4000)
-
-
-class ChatRequest(BaseModel):
-    message: str = Field(min_length=1, max_length=4000)
-    history: list[ChatTurn] = Field(default_factory=list, max_length=12)
-
-    @model_validator(mode="after")
-    def validate_history_budget(self):
-        if sum(len(turn.content) for turn in self.history) > 12000:
-            raise ValueError("O histórico ultrapassa o limite de 12000 caracteres.")
-        return self
-
-
-@app.get("/api/health")
-def health():
-    return {
-        "status": "ok",
-        "service": "jarvis-dev-local",
-        "ai_configured": bool(os.getenv("OPENAI_API_KEY")),
-        "model": MODEL,
-        "time_utc": datetime.now(timezone.utc).isoformat(),
-    }
-
-
-@app.get("/api/capabilities")
-def capabilities():
-    return {
-        "service": "jarvis-dev-local",
-        "api_version": "0.3.0",
-        "ai": {
-            "configured": bool(os.getenv("OPENAI_API_KEY")),
-            "model": MODEL if os.getenv("OPENAI_API_KEY") else "rules",
-        },
-        "github": {
-            "read_only": True,
-            "repository_listing": True,
-            "source_inspection": True,
-            "single_file_ai_review": True,
-            "multi_file_review": True,
-            "diff_proposal_preview_only": True,
-        },
-        "limits": {
-            "chat_history_turns": 12,
-            "chat_history_characters": 12000,
-            "review_batch_files": 3,
-            "rate_limit_per_host_per_minute": 20,
-        },
-        "authentication": {
-            "bearer_or_session_cookie": True,
-            "session_ttl_seconds": 3600,
-        },
-    }
-
-
-def local_reply(message: str) -> str:
-    normalized = message.casefold()
-    if re.search(r"\b(?:olá|ola|oi|bom dia|boa tarde|boa noite)\b", normalized):
-        return "Olá! Estou no modo local, sem chave de API e sem cobrança de IA. Minhas respostas são limitadas e baseadas em regras simples."
-    if any(word in normalized for word in ("ajuda", "comandos", "o que você faz", "o que voce faz")):
-        return (
-            "Modo local ativo. Posso orientar sobre comandos comuns de desenvolvimento: "
-            "git status para ver alterações, pytest para testes Python, npm test para testes JavaScript "
-            "e npm run build para compilar um frontend. Ainda não executo esses comandos nem acesso seus arquivos."
-        )
-    if "git status" in normalized or "git" in normalized:
-        return "Para conferir o estado do repositório, abra o terminal na pasta do projeto e execute `git status`. Eu não executo o comando neste modo."
-    if "pytest" in normalized or "teste python" in normalized:
-        return "Para rodar os testes Python, entre na pasta do projeto e execute `python -m pytest -q`. Leia a saída para localizar testes que falharam."
-    if "npm" in normalized or "javascript" in normalized or "typescript" in normalized:
-        return "Em projetos Node.js, `npm install` instala dependências, `npm test` executa testes se houver script configurado e `npm run build` compila se o projeto definir esse script."
-    if "python" in normalized:
-        return "Para verificar a versão do Python, execute `python --version`. Para testar um projeto com pytest, use `python -m pytest -q`. Não compartilhe senhas nem tokens."
-    return (
-        "Estou funcionando no modo local, sem chamar uma IA externa. Minhas respostas offline são limitadas. "
-        "Posso ajudar com orientações básicas de Git, Python e Node.js; para análise generativa mais ampla, "
-        "a integração opcional com a API de IA pode ser configurada no backend."
-    )
-
-
-@app.post("/api/chat")
-async def chat(payload: ChatRequest):
-    message = payload.message.strip()
-    if not message:
-        raise HTTPException(status_code=422, detail="A mensagem não pode estar vazia.")
-
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        return {"reply": local_reply(message), "mode": "local", "model": "rules"}
-
+async def _read(client: httpx.AsyncClient, path: str, *, params=None, optional=False):
+    # All paths come from hard-coded API routes and validated GitHub identifiers.
     try:
-        async with AsyncOpenAI(api_key=api_key, timeout=45.0, max_retries=1) as client:
-            response = await client.responses.create(
-                model=MODEL,
-                instructions=SYSTEM_INSTRUCTIONS,
-                input=[
-                    *[{"role": turn.role, "content": turn.content} for turn in payload.history],
-                    {"role": "user", "content": message},
-                ],
-                max_output_tokens=900,
-            )
-        answer = (response.output_text or "").strip()
-        if not answer:
-            raise HTTPException(status_code=502, detail="A IA não retornou texto. Tente novamente.")
-        return {"reply": answer, "mode": "openai", "model": MODEL}
-    except HTTPException:
-        raise
-    except AuthenticationError:
-        raise HTTPException(
-            status_code=503,
-            detail="A chave da API foi recusada. Confira OPENAI_API_KEY no arquivo backend/.env.",
-        ) from None
-    except RateLimitError:
-        raise HTTPException(
-            status_code=429,
-            detail="A API atingiu um limite de uso ou não há saldo disponível. Confira seu painel de API.",
-        ) from None
-    except APIConnectionError:
-        raise HTTPException(
-            status_code=502,
-            detail="Não consegui conectar à API de IA. Verifique sua internet e tente novamente.",
-        ) from None
-    except APIStatusError:
-        raise HTTPException(
-            status_code=502,
-            detail="O provedor de IA retornou um erro. Tente novamente em instantes.",
-        ) from None
+        response = await client.get(API_ROOT + path, params=params, headers=HEADERS)
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="O GitHub demorou para responder.") from None
+    except httpx.RequestError:
+        raise HTTPException(status_code=502, detail="Não foi possível consultar o GitHub.") from None
+    if response.status_code == 404:
+        if optional:
+            return None
+        raise HTTPException(status_code=404, detail="Repositório público não encontrado.")
+    if response.status_code in (403, 429):
+        raise HTTPException(status_code=503, detail="Limite de consultas ao GitHub atingido; tente mais tarde.")
+    if response.status_code != 200:
+        raise HTTPException(status_code=502, detail="O GitHub retornou uma resposta inesperada.")
+    try:
+        return response.json()
+    except ValueError:
+        raise HTTPException(status_code=502, detail="Resposta inválida do GitHub.") from None
+
+
+def _public_repo(data, owner):
+    if not isinstance(data, dict):
+        return None
+    actual_owner = (data.get("owner") or {}).get("login", "")
+    name = data.get("name")
+    if (
+        not isinstance(actual_owner, str)
+        or actual_owner.casefold() != owner.casefold()
+        or data.get("private") is not False
+        or not isinstance(name, str)
+        or not NAME_PATTERN.fullmatch(name)
+        or name in (".", "..")
+    ):
+        return None
+    return {
+        "name": name,
+        "description": str(data.get("description") or "")[:300],
+        "language": str(data.get("language") or "")[:50],
+        "updated_at": str(data.get("updated_at") or ""),
+        "html_url": f"https://github.com/{owner}/{name}",
+    }
+
+
+async def list_public_repositories():
+    owner = configured_owner()
+    async with _client_factory() as client:
+        data = await _read(
+            client, f"/users/{owner}/repos",
+            params={"type": "owner", "sort": "updated", "per_page": 100, "page": 1},
+        )
+    if not isinstance(data, list):
+        raise HTTPException(status_code=502, detail="Formato inesperado da lista do GitHub.")
+    repos = [item for entry in data if (item := _public_repo(entry, owner)) is not None]
+    return {"owner": owner, "repositories": repos, "limit": 100, "scope": "public-read-only"}
+
+
+def _clean_profile(document):
+    """Return inert presentation data only. Commands are shown, never executed."""
+    if not isinstance(document, dict) or document.get("schema_version") != 1:
+        return None
+    kind = document.get("project_kind")
+    if not isinstance(kind, str) or not 1 <= len(kind) <= 64:
+        return None
+    def clean_list(key, *, limit=8):
+        items = document.get(key)
+        if not isinstance(items, list) or len(items) > limit:
+            return []
+        return [item for item in items if isinstance(item, str)
+                and 0 < len(item) <= 280 and "\\x00" not in item][:limit]
+    return {
+        "schema_version": 1,
+        "project_kind": kind,
+        "entry_points": clean_list("entry_points"),
+        "test_commands": clean_list("test_commands"),
+        "review_focus": clean_list("review_focus"),
+    }
+
+
+def _decode_profile(data):
+    if not isinstance(data, dict) or data.get("type") != "file":
+        return None
+    size = data.get("size")
+    if not isinstance(size, int) or size < 1 or size > PROFILE_MAX_BYTES:
+        return None
+    if data.get("encoding") != "base64" or not isinstance(data.get("content"), str):
+        return None
+    try:
+        raw = base64.b64decode("".join(data["content"].split()), validate=True)
+        if len(raw) > PROFILE_MAX_BYTES:
+            return None
+        return _clean_profile(json.loads(raw.decode("utf-8")))
+    except (ValueError, TypeError, UnicodeDecodeError, base64.binascii.Error):
+        return None
+
+
+async def read_public_repository(name: str):
+    if not NAME_PATTERN.fullmatch(name) or name in (".", ".."):
+        raise HTTPException(status_code=422, detail="Nome de repositório inválido.")
+    owner = configured_owner()
+    async with _client_factory() as client:
+        metadata = await _read(client, f"/repos/{owner}/{name}")
+        repo = _public_repo(metadata, owner)
+        if repo is None:
+            raise HTTPException(status_code=404, detail="Repositório público não encontrado.")
+        readme_data = await _read(client, f"/repos/{owner}/{name}/readme", optional=True)
+        profile_data = await _read(client, f"/repos/{owner}/{name}/contents/{PROFILE_PATH}", optional=True)
+
+    readme = ""
+    if isinstance(readme_data, dict) and readme_data.get("encoding") == "base64":
+        if isinstance(readme_data.get("content"), str) and int(readme_data.get("size") or 0) <= 128000:
+            try:
+                raw = base64.b64decode(readme_data["content"], validate=False)
+                readme = raw[:README_PREVIEW_BYTES].decode("utf-8", errors="replace")
+            except (ValueError, TypeError, base64.binascii.Error):
+                readme = ""
+    return {
+        **repo,
+        "readme_preview": readme,
+        "readme_truncated": len(readme.encode("utf-8")) >= README_PREVIEW_BYTES,
+        "codax_profile": _decode_profile(profile_data),
+    }
