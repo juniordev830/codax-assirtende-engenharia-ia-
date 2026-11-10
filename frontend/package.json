@@ -1,19 +1,290 @@
-{
-  "name": "jarvis-dev-frontend",
-  "private": true,
-  "version": "0.1.0",
-  "type": "module",
-  "scripts": {
-    "dev": "vite --host 127.0.0.1",
-    "build": "vite build",
-    "test": "node --test"
-  },
-  "dependencies": {
-    "@vitejs/plugin-react": "^4.3.4",
-    "vite": "^6.0.5",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "lucide-react": "^0.468.0"
-  },
-  "devDependencies": {}
+import { useEffect, useRef, useState } from "react";
+import { Activity, Bot, Code2, Github, Mic, MicOff, Send, ShieldCheck, Wifi, WifiOff, Volume2 } from "lucide-react";
+import { buildContext, clearHistory, HISTORY_PREFERENCE_KEY, loadHistory, MAX_SAVED_MESSAGES, saveHistory } from "./chatHistory.mjs";
+import { downloadConversation } from "./chatExport.mjs";
+import { createChatRequestGate } from "./chatRequestGate.mjs";
+import { getGithubRepositories, getGithubRepository } from "./githubApi.mjs";
+import CodeReviewPanel from "./CodeReviewPanel.jsx";
+import MultiReviewPanel from "./MultiReviewPanel.jsx";
+
+const API = (import.meta.env.VITE_API_URL || "http://127.0.0.1:8765").replace(/\/$/, "");
+const INITIAL_MESSAGES = [{
+  role: "assistant",
+  kind: "welcome",
+  text: "Olá! Sou o J.A.R.V.I.S. Dev. Posso responder orientações básicas no modo local, sem chave de API. Para respostas generativas mais amplas, você pode configurar uma API de IA opcional.",
+}];
+
+export default function App() {
+  const [accessToken, setAccessToken] = useState("");
+  const [accessStatus, setAccessStatus] = useState("");
+  const [online, setOnline] = useState(false);
+  const [aiConfigured, setAiConfigured] = useState(false);
+  const [assistantMode, setAssistantMode] = useState("local");
+  const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [listening, setListening] = useState(false);
+  const [voice, setVoice] = useState(true);
+  const [messages, setMessages] = useState(INITIAL_MESSAGES);
+  const [rememberHistory, setRememberHistory] = useState(false);
+  const [memoryNotice, setMemoryNotice] = useState("");
+  const [activeModule, setActiveModule] = useState("assistant");
+  const [githubOwner, setGithubOwner] = useState("");
+  const [githubRepos, setGithubRepos] = useState([]);
+  const [githubLoaded, setGithubLoaded] = useState(false);
+  const [githubLoading, setGithubLoading] = useState(false);
+  const [githubError, setGithubError] = useState("");
+  const [githubDetails, setGithubDetails] = useState(null);
+  const [githubDetailsLoading, setGithubDetailsLoading] = useState(false);
+  const recognition = useRef(null);
+  const bottom = useRef(null);
+  const chatRequest = useRef(null);
+  if (!chatRequest.current) chatRequest.current = createChatRequestGate();
+
+  useEffect(() => {
+    try {
+      const storage = window.localStorage;
+      if (storage.getItem(HISTORY_PREFERENCE_KEY) === "true") {
+        const saved = loadHistory(storage);
+        setRememberHistory(true);
+        if (saved.length) setMessages(saved);
+      }
+    } catch {
+      setMemoryNotice("Este navegador não permite salvar o histórico.");
+    }
+  }, []);
+  useEffect(() => {
+    if (!rememberHistory) return;
+    try {
+      if (!saveHistory(window.localStorage, messages)) {
+        setMemoryNotice("Não foi possível salvar o histórico neste navegador.");
+      }
+    } catch {
+      setMemoryNotice("Não foi possível salvar o histórico neste navegador.");
+    }
+  }, [messages, rememberHistory]);
+  useEffect(() => {
+    fetch(`${API}/api/health`, {credentials: "include"})
+      .then(r => { if (!r.ok) throw new Error(); return r.json(); })
+      .then(data => { setOnline(true); setAiConfigured(Boolean(data.ai_configured)); setAssistantMode(data.ai_configured ? "openai" : "local"); })
+      .catch(() => { setOnline(false); setAiConfigured(false); });
+  }, []);
+  useEffect(() => { bottom.current?.scrollIntoView({ behavior: "smooth" }); }, [messages, busy]);
+  useEffect(() => () => { chatRequest.current.cancel(); }, []);
+
+  function changeHistoryPreference(enabled) {
+    try {
+      const storage = window.localStorage;
+      if (enabled && !saveHistory(storage, messages)) throw new Error("storage-unavailable");
+      if (!enabled) clearHistory(storage);
+      storage.setItem(HISTORY_PREFERENCE_KEY, enabled ? "true" : "false");
+      setRememberHistory(enabled);
+      setMemoryNotice(enabled
+        ? "Histórico salvo somente neste navegador."
+        : "Histórico local removido; conversa atual continua aberta.");
+    } catch {
+      setMemoryNotice("Não foi possível mudar a configuração de memória.");
+    }
+  }
+
+  function resetConversation() {
+    chatRequest.current.cancel();
+    setBusy(false);
+    if ("speechSynthesis" in window) window.speechSynthesis.cancel();
+    setMessages(INITIAL_MESSAGES);
+    try { clearHistory(window.localStorage); } catch { /* Storage may be blocked. */ }
+    setMemoryNotice("Conversa limpa. O histórico anterior não será enviado à IA.");
+  }
+
+  function exportConversation() {
+    setMemoryNotice(downloadConversation(messages)
+      ? "Download iniciado. O arquivo contém a conversa exibida."
+      : "Não foi possível baixar a conversa neste navegador.");
+  }
+
+  function appendMessage(turn) {
+    setMessages(old => [...old, turn].slice(-MAX_SAVED_MESSAGES));
+  }
+
+  function cancelResponse() {
+    if (!chatRequest.current.cancel()) return;
+    setBusy(false);
+    appendMessage({ role: "assistant", kind: "notice", text: "Resposta cancelada." });
+  }
+
+  async function refreshGithub() {
+    setGithubLoading(true);
+    setGithubError("");
+    try {
+      const data = await getGithubRepositories(API);
+      setGithubOwner(data.owner);
+      setGithubRepos(data.repositories);
+      setGithubLoaded(true);
+      setGithubDetails(null);
+    } catch (error) {
+      setGithubError(error.message || "Não foi possível consultar o GitHub.");
+    } finally {
+      setGithubLoading(false);
+    }
+  }
+
+  function openGithub() {
+    setActiveModule("github");
+    if (!githubLoaded && !githubLoading) refreshGithub();
+  }
+
+  async function inspectGithubRepo(name) {
+    setGithubDetails(null);
+    setGithubDetailsLoading(true);
+    setGithubError("");
+    try {
+      setGithubDetails(await getGithubRepository(API, name));
+    } catch (error) {
+      setGithubError(error.message || "Não foi possível abrir o repositório.");
+    } finally {
+      setGithubDetailsLoading(false);
+    }
+  }
+
+  function speak(text) {
+    if (!voice || !("speechSynthesis" in window)) return;
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = "pt-BR";
+    window.speechSynthesis.speak(utterance);
+  }
+
+  async function send(text = message) {
+    const value = text.trim();
+    if (!value || busy) return;
+    const request = chatRequest.current.start();
+    if (!request) return;
+    const history = buildContext(messages);
+    appendMessage({ role: "user", text: value });
+    setMessage("");
+    setBusy(true);
+    try {
+      const response = await fetch(`${API}/api/chat`, {
+        method: "POST", credentials: "include", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: value, history }), signal: request.signal
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!chatRequest.current.isCurrent(request)) return;
+      if (!response.ok) {
+        if (response.status === 503 && !aiConfigured) setAiConfigured(false);
+        throw new Error(data.detail || "Não foi possível obter resposta da IA.");
+      }
+      const mode = data.mode || "local";
+      setAssistantMode(mode);
+      setAiConfigured(mode === "openai");
+      appendMessage({ role: "assistant", text: data.reply });
+      speak(data.reply);
+    } catch (error) {
+      if (chatRequest.current.isCurrent(request)) {
+        appendMessage({ role: "assistant", kind: "notice", text: error.message || "Não consegui acessar a API local. Confira se o FastAPI está rodando na porta 8765." });
+      }
+    } finally {
+      if (chatRequest.current.finish(request)) setBusy(false);
+    }
+  }
+
+  function toggleMic() {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      appendMessage({ role: "assistant", kind: "notice", text: "Reconhecimento de voz indisponível neste navegador. Tente Edge ou Chrome atualizado." });
+      return;
+    }
+    if (listening) { recognition.current?.stop(); setListening(false); return; }
+    const rec = new SpeechRecognition();
+    rec.lang = "pt-BR"; rec.continuous = false; rec.interimResults = false;
+    rec.onresult = e => { const transcript = e.results?.[0]?.[0]?.transcript || ""; setListening(false); if (transcript) send(transcript); };
+    rec.onerror = () => setListening(false);
+    rec.onend = () => setListening(false);
+    recognition.current = rec; setListening(true); rec.start();
+  }
+
+  const systemStatus = !online ? "Aguardando backend" : aiConfigured ? "IA conectada" : "Modo local · sem API paga";
+
+  return <main className="shell">
+    <header className="topbar">
+      <div className="brand"><div className="brand-mark"><Bot size={25}/></div><div><div className="brand-name">J.A.R.V.I.S.<span> DEV</span></div><div className="sub">ASSISTENTE DE DESENVOLVIMENTO</div></div></div>
+      <div className={`connection ${online ? "online" : "offline"}`}>{online ? <Wifi size={15}/> : <WifiOff size={15}/>} {online && aiConfigured ? "IA CONECTADA" : online ? "MODO LOCAL · SEM IA PAGA" : "OFFLINE"}</div>
+    </header>
+    <section className="hero"><div><div className="eyebrow"><span className="pulse"/> SISTEMA INICIALIZADO</div><h1>Bom dia, <span>desenvolvedor.</span></h1><p>Seu centro de comando para código, revisão e apoio de arquitetura.</p></div></section>
+    <section className="status-grid">
+      <div className="status-card"><Activity size={18}/><div><span>STATUS DO SISTEMA</span><strong>{systemStatus}</strong></div></div>
+      <div className="status-card"><Code2 size={18}/><div><span>AMBIENTE</span><strong>Windows · VS Code</strong></div></div>
+      <div className="status-card"><ShieldCheck size={18}/><div><span>SEGURANÇA</span><strong>Modo protegido</strong></div></div>
+    </section>
+    <form className="composer" onSubmit={async e => {
+      e.preventDefault();
+      try {
+        const response = await fetch(`${API}/api/session`, {
+          method: "POST", credentials: "include", headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({token: accessToken})
+        });
+        setAccessStatus(response.ok ? "Acesso autorizado por 1 hora." : "Não foi possível autorizar o acesso.");
+      } catch { setAccessStatus("Servidor indisponível."); }
+      setAccessToken("");
+    }}>
+      <input type="password" value={accessToken} onChange={e => setAccessToken(e.target.value)} placeholder="Token de acesso remoto (se configurado)" aria-label="Token de acesso" maxLength={512}/>
+      <button type="submit" aria-label="Autorizar acesso">Autorizar acesso</button>
+      <span role="status" aria-live="polite">{accessStatus}</span>
+    </form>
+    <section className="workspace">
+      <aside className="sidebar"><div className="section-label">MÓDULOS</div><button type="button" className={`nav-item ${activeModule === "assistant" ? "active" : ""}`} onClick={() => setActiveModule("assistant")}>Assistente</button><button type="button" className={`nav-item ${activeModule === "review" ? "active" : ""}`} onClick={() => setActiveModule("review")}>Revisão</button><button type="button" className={`nav-item ${activeModule === "multi" ? "active" : ""}`} onClick={() => setActiveModule("multi")}>Multi-arquivos</button><button type="button" className={`nav-item ${activeModule === "github" ? "active" : ""}`} onClick={openGithub}><Github size={16}/> GitHub</button></aside>
+      {activeModule === "assistant" ? <section className="chat-panel">
+        <div className="chat-head"><div className="assistant-avatar"><Bot size={20}/></div><div><strong>J.A.R.V.I.S.</strong><span>{aiConfigured ? "IA conectada · programação em português" : "Modo local · sem API paga"}</span></div></div>
+        <div className="memory-controls">
+          <label><input type="checkbox" checked={rememberHistory} onChange={e => changeHistoryPreference(e.target.checked)}/> Salvar conversa neste navegador</label>
+          <button type="button" onClick={resetConversation} aria-label="Limpar conversa">Limpar conversa</button>
+          <button type="button" onClick={exportConversation} disabled={busy || !messages.some(item => item.role === "user" && typeof item.text === "string" && item.text.trim())} aria-label="Baixar conversa">Baixar conversa</button>
+          {busy && <button type="button" onClick={cancelResponse} aria-label="Cancelar resposta">Cancelar resposta</button>}
+          <span role="status" aria-live="polite">{memoryNotice}</span>
+        </div>
+        <div className="messages">{messages.map((item, i) => <div key={i} className={`message-row ${item.role}`}><div className="message-avatar">{item.role === "assistant" ? <Bot size={16}/> : "J"}</div><div className="message-bubble">{item.text}</div></div>)}</div>
+        <form className="composer" onSubmit={e => { e.preventDefault(); send(); }}>
+          <button type="button" className={`mic-button ${listening ? "listening" : ""}`} title="Falar em português" onClick={toggleMic} aria-label={listening ? "Desligar microfone" : "Ativar microfone"}>{listening ? <MicOff size={18}/> : <Mic size={18}/>}</button>
+          <input type="text" value={message} onChange={e => setMessage(e.target.value)} placeholder="Pergunte sobre código, APIs, testes ou arquitetura" aria-label="Mensagem para o assistente" autoComplete="off" />
+          <button type="submit" disabled={busy} aria-label="Enviar mensagem"><Send size={18}/> {busy ? "Enviando" : "Enviar"}</button>
+        </form>
+        <div className="footnote">A memória considera até 12 mensagens anteriores (12 mil caracteres) e é salva neste navegador somente com sua autorização. Não envie senhas, tokens ou chaves privadas.</div>
+      </section> : activeModule === "review" ? <CodeReviewPanel api={API}/> : activeModule === "multi" ? <MultiReviewPanel api={API}/> : <section className="github-panel">
+        <header className="github-head">
+          <div><h2>Projetos do GitHub</h2><p>Repositórios públicos de {githubOwner || "usuário configurado"} — consulta somente para leitura.</p></div>
+          <button type="button" onClick={refreshGithub} disabled={githubLoading} aria-label="Atualizar projetos do GitHub">{githubLoading ? "Consultando..." : "Atualizar"}</button>
+        </header>
+        {githubError && <p className="github-error" role="alert">{githubError} Em acesso remoto, autorize a sessão na aba Assistente.</p>}
+        {!githubLoading && githubLoaded && githubRepos.length === 0 && <p className="github-note">Nenhum repositório público encontrado.</p>}
+        <div className="github-list" aria-label="Lista de repositórios públicos">
+          {githubRepos.map(item => <button type="button" key={item.name} className={`github-repo ${githubDetails?.name === item.name ? "selected" : ""}`} onClick={() => inspectGithubRepo(item.name)} aria-label={`Abrir detalhes do repositório ${item.name}`}>
+            <strong>{item.name}</strong>
+            <span>{item.description || "Sem descrição"}</span>
+            <small>{item.language || "Linguagem não informada"}</small>
+          </button>)}
+        </div>
+        {githubDetailsLoading && <p className="github-note">Abrindo detalhes do repositório...</p>}
+        {githubDetails && <article className="github-details">
+          <h3>{githubDetails.name}</h3>
+          <p>{githubDetails.description || "Sem descrição."}</p>
+          <a href={githubDetails.html_url} target="_blank" rel="noopener noreferrer">Abrir repositório no GitHub</a>
+          {githubDetails.codax_profile && <section className="codax-repo-profile">
+            <h4>Perfil de revisão do Codax</h4>
+            <p><strong>Tipo:</strong> {githubDetails.codax_profile.project_kind}</p>
+            <h4>Arquivos principais</h4>
+            <ul>{githubDetails.codax_profile.entry_points.map(item => <li key={item}><code>{item}</code></li>)}</ul>
+            <h4>Comandos de teste (apenas referência, não são executados)</h4>
+            <ul>{githubDetails.codax_profile.test_commands.map(item => <li key={item}><code>{item}</code></li>)}</ul>
+            <h4>Pontos de atenção na revisão</h4>
+            <ul>{githubDetails.codax_profile.review_focus.map(item => <li key={item}>{item}</li>)}</ul>
+            <p className="github-note">Memória, leitura GitHub, revisão heurística e análise opcional com IA são fornecidas pelo Codax, não por este repositório. O Codax nunca executa os comandos de build/test em repositórios públicos.</p>
+          </section>}
+          <h4>Prévia do README (texto)</h4>
+          {githubDetails.readme_preview ? <pre>{githubDetails.readme_preview}</pre> : <p>Este repositório não tem um README disponível para prévia.</p>}
+          {githubDetails.readme_truncated && <p>Prévia limitada a 8 KB. Consulte o arquivo completo no GitHub.</p>}
+        </article>}
+        <p className="github-note">Esta integração não modifica arquivos, branches, issues ou pull requests. Não acessa repositórios privados.</p>
+      </section>}
+    </section>
+    <footer>J.A.R.V.I.S. DEV <span>v0.3.0 · MODO LOCAL + IA OPCIONAL</span></footer>
+  </main>;
 }
