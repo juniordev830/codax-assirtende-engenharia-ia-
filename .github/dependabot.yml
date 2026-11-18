@@ -5,6 +5,15 @@ updates:
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
+    groups:
+      vite-tooling:
+        patterns:
+          - "vite"
+          - "@vitejs/plugin-react"
+      react-runtime:
+        patterns:
+          - "react"
+          - "react-dom"
 
   - package-ecosystem: "pip"
     directory: "/backend"
