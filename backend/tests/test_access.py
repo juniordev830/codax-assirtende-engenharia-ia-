@@ -46,3 +46,25 @@ def test_bearer_requires_scheme_and_unicode_login_is_handled(monkeypatch):
             assert response.status_code == 401
     finally:
         main._buckets.clear()
+
+
+def test_loopback_without_token_requires_explicit_development_mode(monkeypatch):
+    monkeypatch.delenv("CODAX_ACCESS_TOKEN", raising=False)
+    monkeypatch.delenv("CODAX_ENV", raising=False)
+    main._buckets.clear()
+    with TestClient(main.app) as client:
+        response = client.post("/api/chat", json={"message": "oi"})
+        assert response.status_code == 503
+
+    monkeypatch.setenv("CODAX_ENV", "development")
+    main._buckets.clear()
+    with TestClient(main.app) as client:
+        response = client.post("/api/chat", json={"message": "oi"})
+        assert response.status_code == 200
+
+    monkeypatch.setenv("CODAX_ENV", "production")
+    main._buckets.clear()
+    with TestClient(main.app) as client:
+        response = client.post("/api/chat", json={"message": "oi"})
+        assert response.status_code == 503
+    main._buckets.clear()
