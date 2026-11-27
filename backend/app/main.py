@@ -66,9 +66,10 @@ async def access_control(request: Request, call_next):
             return JSONResponse({"detail": "Muitas requisições. Aguarde um minuto."}, status_code=429, headers={"Retry-After": "60"})
         if request.url.path not in {"/api/health", "/api/session"}:
             token = os.getenv("CODAX_ACCESS_TOKEN", "")
-            local = host in {"127.0.0.1", "::1", "testclient"}
-            if not token and not local:
-                return JSONResponse({"detail": "Configure CODAX_ACCESS_TOKEN antes do acesso remoto."}, status_code=503)
+            environment = os.getenv("CODAX_ENV", "production").strip().lower()
+            local_development = environment == "development" and host in {"127.0.0.1", "::1", "testclient"}
+            if not token and not local_development:
+                return JSONResponse({"detail": "Configure CODAX_ACCESS_TOKEN; acesso sem token só é permitido no loopback com CODAX_ENV=development."}, status_code=503)
             if token:
                 if len(token) < 32:
                     return JSONResponse({"detail": "Configure um token de acesso com pelo menos 32 caracteres."}, status_code=503)
