@@ -7,7 +7,8 @@ def test_remote_access_fails_closed_without_token(monkeypatch):
     with TestClient(main.app, client=("192.0.2.1", 123)) as client:
         assert client.post("/api/chat", json={"message": "oi"}).status_code == 503
 
-def test_session_and_rate_limit(monkeypatch):
+def test_session_and_rate_limit(monkeypatch, tmp_path):
+    monkeypatch.setenv("CODAX_SESSIONS_DB", str(tmp_path / "sessions.db"))
     token = "test-access-token-" * 3
     monkeypatch.setenv("CODAX_ACCESS_TOKEN", token)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
@@ -67,4 +68,21 @@ def test_loopback_without_token_requires_explicit_development_mode(monkeypatch):
     with TestClient(main.app) as client:
         response = client.post("/api/chat", json={"message": "oi"})
         assert response.status_code == 503
+    main._buckets.clear()
+
+
+def test_logout_revokes_the_copied_session_and_preserves_other_sessions(monkeypatch, tmp_path):
+    token = "fixture-token-" * 3
+    monkeypatch.setenv("CODAX_ACCESS_TOKEN", token)
+    monkeypatch.setenv("CODAX_SESSIONS_DB", str(tmp_path / "sessions.db"))
+    main._buckets.clear()
+    origin = {"Origin": "http://localhost:5173"}
+    with TestClient(main.app) as first, TestClient(main.app) as second, TestClient(main.app) as copied:
+        assert first.post("/api/session", json={"token": token}, headers=origin).status_code == 200
+        assert second.post("/api/session", json={"token": token}, headers=origin).status_code == 200
+        copied.cookies.set("codax_session", first.cookies.get("codax_session"))
+        assert first.post("/api/session/logout", headers={"Origin": "https://other.example"}).status_code == 403
+        assert first.post("/api/session/logout", headers=origin).status_code == 200
+        assert copied.get("/api/capabilities").status_code == 401
+        assert second.get("/api/capabilities").status_code == 200
     main._buckets.clear()

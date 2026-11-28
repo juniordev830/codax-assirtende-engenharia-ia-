@@ -17,6 +17,7 @@ const INITIAL_MESSAGES = [{
 export default function App() {
   const [accessToken, setAccessToken] = useState("");
   const [accessStatus, setAccessStatus] = useState("");
+  const [accessPending, setAccessPending] = useState(false);
   const [online, setOnline] = useState(false);
   const [aiConfigured, setAiConfigured] = useState(false);
   const [assistantMode, setAssistantMode] = useState("local");
@@ -217,6 +218,7 @@ export default function App() {
     </section>
     <form className="composer" onSubmit={async e => {
       e.preventDefault();
+      setAccessPending(true);
       try {
         const response = await fetch(`${API}/api/session`, {
           method: "POST", credentials: "include", headers: {"Content-Type": "application/json"},
@@ -224,10 +226,19 @@ export default function App() {
         });
         setAccessStatus(response.ok ? "Acesso autorizado por 1 hora." : "Não foi possível autorizar o acesso.");
       } catch { setAccessStatus("Servidor indisponível."); }
-      setAccessToken("");
+      finally { setAccessToken(""); setAccessPending(false); }
     }}>
       <input type="password" value={accessToken} onChange={e => setAccessToken(e.target.value)} placeholder="Token de acesso remoto (se configurado)" aria-label="Token de acesso" maxLength={512}/>
-      <button type="submit">Autorizar acesso</button><span role="status">{accessStatus}</span>
+      <button type="submit" disabled={accessPending || !accessToken}>Autorizar acesso</button>
+      <button type="button" disabled={accessPending} onClick={async () => {
+        setAccessPending(true);
+        try {
+          const response = await fetch(`${API}/api/session/logout`, {method: "POST", credentials: "include"});
+          setAccessStatus(response.ok ? "Sessão encerrada." : "Não foi possível encerrar a sessão.");
+        } catch { setAccessStatus("Servidor indisponível."); }
+        finally { setAccessPending(false); }
+      }}>Encerrar sessão</button>
+      <span role="status">{accessStatus}</span>
     </form>
     <section className="workspace">
       <aside className="sidebar"><div className="section-label">MÓDULOS</div><button type="button" className={`nav-item ${activeModule === "assistant" ? "active" : ""}`} onClick={() => setActiveModule("assistant")} aria-pressed={activeModule === "assistant"}><Bot size={17}/> Assistente</button><button type="button" className={`nav-item ${activeModule === "review" ? "active" : ""}`} onClick={() => setActiveModule("review")} aria-pressed={activeModule === "review"}><Code2 size={17}/> Revisão de código <small>LEITURA</small></button><button type="button" className={`nav-item ${activeModule === "multi" ? "active" : ""}`} onClick={() => setActiveModule("multi")} aria-pressed={activeModule === "multi"}><Code2 size={17}/> Revisão múltipla <small>DIFF</small></button><button type="button" className={`nav-item ${activeModule === "github" ? "active" : ""}`} onClick={openGithub} aria-pressed={activeModule === "github"}><GitFork size={17}/> GitHub <small>LEITURA</small></button><div className="security-note"><ShieldCheck size={18}/><div><strong>Proteção ativa</strong><p>A IA conversa e orienta, mas ainda não executa comandos nem altera arquivos.</p></div></div></aside>
