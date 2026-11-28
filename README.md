@@ -202,3 +202,7 @@ Configure `VITE_API_URL` no frontend com a URL HTTPS do backend e `CORS_ORIGINS`
 ## Verificação antes de contribuir
 
 O [guia de validação](docs/GUIA_DE_VALIDACAO.md) descreve o estado do código, as verificações reproduzíveis e os riscos a observar ao revisar novas alterações.
+
+### Sessões do navegador
+
+A sessão fica ativa por até uma hora. **Encerrar sessão** invalida aquele acesso no servidor. A configuração `CODAX_SESSIONS_DB` permite indicar um arquivo SQLite em diretório privado e persistente. O caminho padrão é `~/.codax/sessions.sqlite3`. Sessões emitidas pelo formato antigo precisam de novo login após a atualização.

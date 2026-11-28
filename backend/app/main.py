@@ -1,4 +1,6 @@
+import asyncio
 import os
+import sqlite3
 import re
 import hmac
 import time
@@ -14,6 +16,7 @@ from openai import APIConnectionError, APIStatusError, AuthenticationError, Asyn
 from pydantic import BaseModel, Field, ConfigDict, model_validator
 from typing import Literal
 
+from app import sessions
 from app.github_readonly import list_public_repositories, read_public_repository
 from app.code_inspection import list_reviewable_files, inspect_public_source
 from app.ai_code_review import review_with_ai
@@ -64,7 +67,7 @@ async def access_control(request: Request, call_next):
         host = request.client.host if request.client else ""
         if (request.method == "POST" or request.url.path.startswith("/api/github/")) and _limited(host):
             return JSONResponse({"detail": "Muitas requisições. Aguarde um minuto."}, status_code=429, headers={"Retry-After": "60"})
-        if request.url.path not in {"/api/health", "/api/session"}:
+        if request.url.path not in {"/api/health", "/api/session", "/api/session/logout"}:
             token = os.getenv("CODAX_ACCESS_TOKEN", "")
             environment = os.getenv("CODAX_ENV", "production").strip().lower()
             local_development = environment == "development" and host in {"127.0.0.1", "::1", "testclient"}
@@ -75,20 +78,19 @@ async def access_control(request: Request, call_next):
                     return JSONResponse({"detail": "Configure um token de acesso com pelo menos 32 caracteres."}, status_code=503)
                 authorization = request.headers.get("authorization", "")
                 supplied = authorization[7:] if authorization.startswith("Bearer ") else ""
-                cookie = request.cookies.get("codax_session", "")
-                valid_cookie = False
-                try:
-                    expiry, signature = cookie.split(".", 1)
-                    expected = hmac.new(token.encode(), ("codax:" + expiry).encode(), "sha256").hexdigest()
-                    valid_cookie = int(expiry) > time.time() and hmac.compare_digest(signature, expected)
-                except (ValueError, TypeError):
-                    pass
-                if not (hmac.compare_digest(supplied.encode("utf-8"), token.encode("utf-8")) or valid_cookie):
-                    return JSONResponse({"detail": "Autenticação necessária."}, status_code=401)
-                if valid_cookie and request.method == "POST":
-                    allowed = os.getenv("CORS_ORIGINS", "http://127.0.0.1:5173,http://localhost:5173").split(",")
-                    if request.headers.get("origin") not in allowed:
-                        return JSONResponse({"detail": "Origem não autorizada."}, status_code=403)
+                bearer_valid = hmac.compare_digest(supplied.encode("utf-8"), token.encode("utf-8"))
+                if not bearer_valid:
+                    cookie = request.cookies.get(sessions.COOKIE_NAME, "")
+                    try:
+                        allowed_session = bool(cookie) and await asyncio.to_thread(sessions.valid, token, cookie)
+                    except (OSError, sqlite3.Error):
+                        return JSONResponse({"detail": "Sessão temporariamente indisponível."}, status_code=503)
+                    if not allowed_session:
+                        return JSONResponse({"detail": "Autenticação necessária."}, status_code=401)
+                    if request.method == "POST":
+                        allowed = os.getenv("CORS_ORIGINS", "http://127.0.0.1:5173,http://localhost:5173").split(",")
+                        if request.headers.get("origin") not in allowed:
+                            return JSONResponse({"detail": "Origem não autorizada."}, status_code=403)
     return await call_next(request)
 
 @app.get("/api/github/repos")
@@ -167,11 +169,33 @@ def session(payload: SessionRequest, request: Request, response: Response):
         raise HTTPException(status_code=503, detail="Configure um token de acesso com pelo menos 32 caracteres.")
     if not hmac.compare_digest(payload.token.encode("utf-8"), token.encode("utf-8")):
         raise HTTPException(status_code=401, detail="Token inválido.")
-    expiry = str(int(time.time()) + 3600)
-    signature = hmac.new(token.encode(), ("codax:" + expiry).encode(), "sha256").hexdigest()
-    response.set_cookie("codax_session", expiry + "." + signature, httponly=True, samesite="strict",
-                        secure=request.url.scheme == "https", max_age=3600)
+    try:
+        session_id = sessions.create(token, request.cookies.get(sessions.COOKIE_NAME, ""))
+    except (OSError, sqlite3.Error):
+        session_id = None
+    if session_id is None:
+        raise HTTPException(status_code=503, detail="Não foi possível iniciar a sessão.")
+    response.headers["Cache-Control"] = "no-store"
+    response.set_cookie(sessions.COOKIE_NAME, session_id, httponly=True, samesite="strict",
+                        secure=request.url.scheme == "https", max_age=sessions.TTL)
     return {"authenticated": True}
+
+
+@app.post("/api/session/logout")
+def logout_session(request: Request, response: Response):
+    allowed = os.getenv("CORS_ORIGINS", "http://127.0.0.1:5173,http://localhost:5173").split(",")
+    if request.headers.get("origin") not in allowed:
+        raise HTTPException(status_code=403, detail="Origem não autorizada.")
+    token = os.getenv("CODAX_ACCESS_TOKEN", "")
+    if token:
+        try:
+            sessions.revoke(token, request.cookies.get(sessions.COOKIE_NAME, ""))
+        except (OSError, sqlite3.Error):
+            raise HTTPException(status_code=503, detail="Não foi possível revogar a sessão.") from None
+    response.headers["Cache-Control"] = "no-store"
+    response.delete_cookie(sessions.COOKIE_NAME, httponly=True, samesite="strict",
+                           secure=request.url.scheme == "https")
+    return {"authenticated": False}
 
 
 # Previous turns are supplied by the client, never stored on the server.
